@@ -11,6 +11,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -28,6 +29,8 @@ import ru.hdlabs.treex.data.settings.SettingsRepository
 import ru.hdlabs.treex.domain.RelativeAttach
 import ru.hdlabs.treex.domain.SpouseDraft
 import ru.hdlabs.treex.domain.TreeRules
+import ru.hdlabs.treex.domain.mergePerson
+import ru.hdlabs.treex.domain.mergeSpouseDrafts
 import ru.hdlabs.treex.domain.spouseDraftsOf
 import ru.hdlabs.treex.sync.GitHubTreeSync
 import java.io.File
@@ -78,14 +81,20 @@ class TreeRepository(
         spouses: List<SpouseDraft>,
         snapshot: Boolean,
         attach: RelativeAttach? = null,
+        preserveUntouched: Boolean = false,
+        touched: Set<String> = emptySet(),
     ): Boolean {
-        val changed = mutex.withLock {
+        // Уход в настройки отменяет корутину экрана. Запись нельзя откатывать вместе с ней.
+        val changed = withContext(NonCancellable) {
+            mutex.withLock {
             database.withTransaction {
                 val existing = peopleDao.all()
                 val knownIds = existing.map { it.id }.toSet() + person.id
-                val fatherId = person.fatherId?.takeIf { it in knownIds && it != person.id }
-                val motherId = person.motherId?.takeIf { it in knownIds && it != person.id && it != fatherId }
-                val clean = person.copy(fatherId = fatherId, motherId = motherId)
+                val previous = peopleDao.get(person.id)
+                val merged = if (previous != null && preserveUntouched) mergePerson(previous, person, touched) else person
+                val fatherId = merged.fatherId?.takeIf { it in knownIds && it != merged.id }
+                val motherId = merged.motherId?.takeIf { it in knownIds && it != merged.id && it != fatherId }
+                val clean = merged.copy(fatherId = fatherId, motherId = motherId)
                 val parents = existing.associate { it.id to (it.fatherId to it.motherId) }.toMutableMap()
                 parents[clean.id] = clean.fatherId to clean.motherId
                 if (TreeRules.createsCycle(parents, clean.id, clean.fatherId, clean.motherId)) {
@@ -105,13 +114,16 @@ class TreeRepository(
                 ) {
                     throw IllegalArgumentException("Такая связь замыкает круг в древе")
                 }
-                val previous = peopleDao.get(clean.id)
                 val previousSpouses = spouseDraftsOf(unionDao.all(), clean.id).sortedBy { it.personId }
-                val nextSpouses = (spouses + listOfNotNull(
+                val formSpouses = (spouses + listOfNotNull(
                     if (linkRole == "spouse" && anchor != null) SpouseDraft(anchor.id, spouses.find { it.personId == anchor.id }?.marriedOn.orEmpty()) else null,
                 )).filter { it.personId.isNotBlank() && it.personId != clean.id && it.personId in knownIds }
                     .distinctBy { it.personId }
-                    .sortedBy { it.personId }
+                val nextSpouses = mergeSpouseDrafts(
+                    previous = previousSpouses,
+                    incoming = formSpouses,
+                    replace = previous == null || !preserveUntouched || "spouses" in touched,
+                ).sortedBy { it.personId }
                 val anchorAlreadyLinked = when (linkRole) {
                     "father" -> anchor?.fatherId == clean.id
                     "mother" -> anchor?.motherId == clean.id
@@ -148,6 +160,7 @@ class TreeRepository(
                     if (snapshot) snapshotLocked(readLocked())
                     true
                 }
+            }
             }
         }
         if (changed) schedulePush()

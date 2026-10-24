@@ -5,8 +5,14 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import ru.hdlabs.treex.data.local.PersonEntity
 import ru.hdlabs.treex.data.local.UnionEntity
+import ru.hdlabs.treex.domain.SpouseDraft
 import ru.hdlabs.treex.domain.TreeLayout
 import ru.hdlabs.treex.domain.TreeRules
+import ru.hdlabs.treex.domain.mergePerson
+import ru.hdlabs.treex.domain.mergeSpouseDrafts
+import ru.hdlabs.treex.domain.acceptsAsSpouse
+import ru.hdlabs.treex.domain.addSpouseLabel
+import ru.hdlabs.treex.domain.spouseNoun
 import ru.hdlabs.treex.domain.suggestPatronymic
 import ru.hdlabs.treex.update.ReleaseVersionParser
 
@@ -103,5 +109,49 @@ class TreeCodecTest {
     fun versionTagMatchesAppCode() {
         assertEquals(10000, ReleaseVersionParser.parseVersionCode("v1.0.0", 0))
         assertEquals(10001, ReleaseVersionParser.parseVersionCode("v1.0.1", 0))
+        assertEquals(10002, ReleaseVersionParser.parseVersionCode("v1.0.2", 0))
+    }
+
+    @Test
+    fun leavingTheFormDoesNotEraseUntouchedSpouseFields() {
+        val saved = PersonEntity(
+            id = "wife",
+            lastName = "Иванова",
+            firstName = "Мария",
+            phone = "+79990001122",
+            email = "maria@example.com",
+            gender = "f",
+        )
+        val blankForm = PersonEntity(id = "wife", firstName = "Мария")
+        val merged = mergePerson(saved, blankForm, touched = setOf("firstName"))
+        assertEquals("Иванова", merged.lastName)
+        assertEquals("+79990001122", merged.phone)
+        assertEquals("maria@example.com", merged.email)
+        assertEquals("f", merged.gender)
+
+        val kept = mergeSpouseDrafts(
+            previous = listOf(SpouseDraft("husband", "2001-05-01")),
+            incoming = emptyList(),
+            replace = false,
+        )
+        assertEquals(listOf(SpouseDraft("husband", "2001-05-01")), kept)
+    }
+
+    @Test
+    fun spouseOfferFollowsFocusGender() {
+        assertEquals("Супруга", spouseNoun("m"))
+        assertEquals("Супруг", spouseNoun("f"))
+        assertEquals("Супруг", spouseNoun("u"))
+        assertEquals("Добавить супругу", addSpouseLabel("m"))
+        assertEquals("Добавить супруга", addSpouseLabel("f"))
+        assertEquals("Добавить супруга", addSpouseLabel("u"))
+        assertTrue(acceptsAsSpouse("m", "f"))
+        assertTrue(!acceptsAsSpouse("m", "m"))
+        assertTrue(!acceptsAsSpouse("m", "u"))
+        assertTrue(acceptsAsSpouse("f", "m"))
+        assertTrue(!acceptsAsSpouse("f", "f"))
+        assertTrue(acceptsAsSpouse("u", "m"))
+        assertTrue(acceptsAsSpouse("u", "f"))
+        assertTrue(acceptsAsSpouse("u", "u"))
     }
 }

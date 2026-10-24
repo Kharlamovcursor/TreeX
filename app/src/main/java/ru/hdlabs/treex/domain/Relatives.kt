@@ -1,5 +1,6 @@
 package ru.hdlabs.treex.domain
 
+import ru.hdlabs.treex.data.local.PersonEntity
 import ru.hdlabs.treex.data.local.UnionEntity
 
 data class SpouseDraft(
@@ -25,6 +26,38 @@ fun parseSpouseDrafts(raw: String): List<SpouseDraft> =
 
 fun formatSpouseDrafts(drafts: List<SpouseDraft>): String =
     drafts.distinctBy { it.personId }.joinToString(",") { "${it.personId}=${it.marriedOn}" }
+
+fun mergePerson(previous: PersonEntity, incoming: PersonEntity, touched: Set<String>): PersonEntity {
+    fun <T> field(name: String, incomingValue: T, previousValue: T): T =
+        if (name in touched) incomingValue else previousValue
+    return incoming.copy(
+        lastName = field("lastName", incoming.lastName, previous.lastName),
+        birthLastName = field("birthLastName", incoming.birthLastName, previous.birthLastName),
+        firstName = field("firstName", incoming.firstName, previous.firstName),
+        middleName = field("middleName", incoming.middleName, previous.middleName),
+        gender = field("gender", incoming.gender, previous.gender),
+        birthDate = field("birthDate", incoming.birthDate, previous.birthDate),
+        deathDate = field("deathDate", incoming.deathDate, previous.deathDate),
+        birthPlace = field("birthPlace", incoming.birthPlace, previous.birthPlace),
+        email = field("email", incoming.email, previous.email),
+        phone = field("phone", incoming.phone, previous.phone),
+        photoFile = field("photo", incoming.photoFile, previous.photoFile),
+        notes = field("notes", incoming.notes, previous.notes),
+        fatherId = field("father", incoming.fatherId, previous.fatherId),
+        motherId = field("mother", incoming.motherId, previous.motherId),
+        createdAtMillis = previous.createdAtMillis.takeIf { it > 0 } ?: incoming.createdAtMillis,
+    )
+}
+
+fun mergeSpouseDrafts(
+    previous: List<SpouseDraft>,
+    incoming: List<SpouseDraft>,
+    replace: Boolean,
+): List<SpouseDraft> {
+    if (replace) return incoming.distinctBy { it.personId }
+    val known = previous.map { it.personId }.toSet()
+    return (previous + incoming.filter { it.personId !in known }).distinctBy { it.personId }
+}
 
 fun spouseDraftsOf(unions: List<UnionEntity>, personId: String): List<SpouseDraft> =
     unions.mapNotNull { union ->

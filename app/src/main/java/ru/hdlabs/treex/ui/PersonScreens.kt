@@ -27,6 +27,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
@@ -49,11 +50,15 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import ru.hdlabs.treex.TreeXApplication
 import ru.hdlabs.treex.data.PhotoStore
 import ru.hdlabs.treex.data.TreeState
 import ru.hdlabs.treex.data.local.PersonEntity
+import ru.hdlabs.treex.domain.acceptsAsSpouse
+import ru.hdlabs.treex.domain.addSpouseLabel
 import ru.hdlabs.treex.domain.RelativeAttach
 import ru.hdlabs.treex.domain.SpouseDraft
 import ru.hdlabs.treex.domain.formatSpouseDrafts
@@ -62,6 +67,7 @@ import ru.hdlabs.treex.domain.lifeLine
 import ru.hdlabs.treex.domain.parseSpouseDrafts
 import ru.hdlabs.treex.domain.spouseDraftsOf
 import ru.hdlabs.treex.domain.spouseIdsOf
+import ru.hdlabs.treex.domain.spouseNoun
 import ru.hdlabs.treex.domain.suggestPatronymic
 import ru.hdlabs.treex.navigation.Routes
 import ru.hdlabs.treex.ui.components.HdCard
@@ -135,6 +141,33 @@ fun PersonEditorScreen(routeId: String, role: String, anchor: String, nav: NavHo
     )
     val hasName = draft.lastName.isNotBlank() || draft.firstName.isNotBlank() || draft.middleName.isNotBlank()
     val signature = listOf(lastName, birthLastName, firstName, middleName, gender, birthDate, deathDate, birthPlace, email, phone, photoFile, notes, fatherId, motherId, spouseRaw).joinToString("|")
+    val buffer = remember(personId) { EditorBuffer() }
+    val saveGate = remember(personId) { Mutex() }
+    var closing by remember(personId) { mutableStateOf(false) }
+    buffer.person = draft
+    buffer.spouses = spouseDrafts
+    buffer.attach = attach
+    buffer.hasName = hasName
+    buffer.ready = ready
+    val saveScope = app.container.scope
+
+    suspend fun flush(snapshot: Boolean) {
+        saveGate.withLock {
+            while (true) {
+                if (!buffer.ready || !buffer.hasName || buffer.touched.isEmpty()) return@withLock
+                val epoch = buffer.epoch
+                repo.savePerson(
+                    buffer.person,
+                    buffer.spouses,
+                    snapshot = snapshot,
+                    attach = buffer.attach,
+                    preserveUntouched = true,
+                    touched = buffer.touched,
+                )
+                if (buffer.epoch == epoch) return@withLock
+            }
+        }
+    }
 
     LaunchedEffect(personId) {
         appeared = true
@@ -172,12 +205,24 @@ fun PersonEditorScreen(routeId: String, role: String, anchor: String, nav: NavHo
         val hostSpouses = spouseIdsOf(current.unions, host.id)
         when (role) {
             "father" -> {
-                if (lastName.isBlank()) lastName = host.lastName
-                if (gender == "u") gender = "m"
+                if (lastName.isBlank()) {
+                    lastName = host.lastName
+                    buffer.mark("lastName")
+                }
+                if (gender == "u") {
+                    gender = "m"
+                    buffer.mark("gender")
+                }
             }
             "mother" -> {
-                if (lastName.isBlank()) lastName = host.lastName
-                if (gender == "u") gender = "f"
+                if (lastName.isBlank()) {
+                    lastName = host.lastName
+                    buffer.mark("lastName")
+                }
+                if (gender == "u") {
+                    gender = "f"
+                    buffer.mark("gender")
+                }
             }
             "spouse" -> {
                 if (gender == "u") {
@@ -186,8 +231,12 @@ fun PersonEditorScreen(routeId: String, role: String, anchor: String, nav: NavHo
                         "f" -> "m"
                         else -> "u"
                     }
+                    buffer.mark("gender")
                 }
-                if (spouseRaw.isBlank()) spouseRaw = host.id
+                if (spouseRaw.isBlank()) {
+                    spouseRaw = host.id
+                    buffer.mark("spouses")
+                }
             }
             "child" -> {
                 val father = if (host.gender == "m") {
@@ -200,10 +249,17 @@ fun PersonEditorScreen(routeId: String, role: String, anchor: String, nav: NavHo
                 } else {
                     hostSpouses.firstOrNull { id -> current.people.find { it.id == id }?.gender == "f" }.orEmpty()
                 }
-                if (fatherId.isBlank()) fatherId = father
-                if (motherId.isBlank()) motherId = mother
+                if (fatherId.isBlank() && father.isNotBlank()) {
+                    fatherId = father
+                    buffer.mark("father")
+                }
+                if (motherId.isBlank() && mother.isNotBlank()) {
+                    motherId = mother
+                    buffer.mark("mother")
+                }
                 if (lastName.isBlank()) {
                     lastName = current.people.find { it.id == father }?.lastName ?: host.lastName
+                    buffer.mark("lastName")
                 }
             }
         }
@@ -213,18 +269,37 @@ fun PersonEditorScreen(routeId: String, role: String, anchor: String, nav: NavHo
         if (role != "child" || !shaped || middleTouched || middleName.isNotBlank()) return@LaunchedEffect
         val father = tree.people.find { it.id == fatherId } ?: return@LaunchedEffect
         val suggested = suggestPatronymic(father.firstName, gender)
-        if (suggested.isNotBlank()) middleName = suggested
+        if (suggested.isNotBlank()) {
+            middleName = suggested
+            buffer.mark("middleName")
+        }
     }
     LaunchedEffect(signature, ready) {
-        if (!ready || !hasName) return@LaunchedEffect
+        if (!ready || !hasName || buffer.touched.isEmpty()) return@LaunchedEffect
         kotlinx.coroutines.delay(1_500)
         try {
-            repo.savePerson(draft, spouseDrafts, snapshot = false, attach = attach)
+            flush(snapshot = false)
             status = "Сохранено в приложении"
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
             status = e.message ?: "Не удалось сохранить"
+        }
+    }
+    DisposableEffect(personId) {
+        onDispose {
+            val shotReady = buffer.ready
+            val shotNamed = buffer.hasName
+            val shotTouched = buffer.touched.isNotEmpty()
+            if (shotReady && shotNamed && shotTouched) {
+                saveScope.launch {
+                    try {
+                        flush(snapshot = true)
+                    } catch (_: CancellationException) {
+                    } catch (_: Exception) {
+                    }
+                }
+            }
         }
     }
 
@@ -233,6 +308,7 @@ fun PersonEditorScreen(routeId: String, role: String, anchor: String, nav: NavHo
         scope.launch {
             try {
                 photoFile = withContext(Dispatchers.IO) { PhotoStore.save(context, personId, uri) }
+                buffer.mark("photo")
             } catch (e: Exception) {
                 status = e.message ?: "Не удалось открыть фото"
             }
@@ -240,15 +316,22 @@ fun PersonEditorScreen(routeId: String, role: String, anchor: String, nav: NavHo
     }
 
     fun finish() {
-        scope.launch {
+        if (closing) return
+        closing = true
+        saveScope.launch {
             try {
-                if (ready && hasName) repo.savePerson(draft, spouseDrafts, snapshot = true, attach = attach)
-                if (hasName) nav.previousBackStackEntry?.savedStateHandle?.set("highlight", personId)
-                nav.popBackStack()
+                flush(snapshot = true)
+                withContext(Dispatchers.Main) {
+                    if (hasName) nav.previousBackStackEntry?.savedStateHandle?.set("highlight", personId)
+                    nav.popBackStack()
+                }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                status = e.message ?: "Не удалось сохранить"
+                withContext(Dispatchers.Main) {
+                    closing = false
+                    status = e.message ?: "Не удалось сохранить"
+                }
             }
         }
     }
@@ -282,43 +365,50 @@ fun PersonEditorScreen(routeId: String, role: String, anchor: String, nav: NavHo
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Box(Modifier.weight(1f)) { HdSecondaryButton("Фото") { photoPicker.launch("image/*") } }
                     if (photoFile.isNotBlank()) {
-                        Box(Modifier.weight(1f)) { HdSecondaryButton("Убрать фото") { photoFile = "" } }
+                        Box(Modifier.weight(1f)) {
+                            HdSecondaryButton("Убрать фото") {
+                                buffer.mark("photo")
+                                photoFile = ""
+                            }
+                        }
                     }
                 }
                 Spacer(Modifier.height(8.dp))
-                HdTextField(lastName, { lastName = it }, "Фамилия")
-                HdTextField(birthLastName, { birthLastName = it }, "Девичья фамилия")
-                HdTextField(firstName, { firstName = it }, "Имя")
-                HdTextField(middleName, { middleTouched = true; middleName = it }, "Отчество")
+                HdTextField(lastName, { buffer.mark("lastName"); lastName = it }, "Фамилия")
+                HdTextField(birthLastName, { buffer.mark("birthLastName"); birthLastName = it }, "Девичья фамилия")
+                HdTextField(firstName, { buffer.mark("firstName"); firstName = it }, "Имя")
+                HdTextField(middleName, { middleTouched = true; buffer.mark("middleName"); middleName = it }, "Отчество")
                 if (duplicate) Text("Такое ФИО уже есть в древе", color = HdOrange, modifier = Modifier.padding(top = 4.dp))
                 Spacer(Modifier.height(8.dp))
-                HdTextField(phone, { phone = it }, "Телефон", keyboardType = KeyboardType.Phone)
-                HdTextField(email, { email = it }, "Почта", keyboardType = KeyboardType.Email)
+                HdTextField(phone, { buffer.mark("phone"); phone = it }, "Телефон", keyboardType = KeyboardType.Phone)
+                HdTextField(email, { buffer.mark("email"); email = it }, "Почта", keyboardType = KeyboardType.Email)
             }
             Spacer(Modifier.height(12.dp))
             HdCard {
                 Text("Пол", color = HdTextPrimary, fontWeight = FontWeight.SemiBold)
                 Spacer(Modifier.height(8.dp))
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    GenderChoice("Муж", gender == "m", Modifier.weight(1f)) { gender = "m" }
-                    GenderChoice("Жен", gender == "f", Modifier.weight(1f)) { gender = "f" }
-                    GenderChoice("Не указан", gender == "u", Modifier.weight(1f)) { gender = "u" }
+                    GenderChoice("Муж", gender == "m", Modifier.weight(1f)) { buffer.mark("gender"); gender = "m" }
+                    GenderChoice("Жен", gender == "f", Modifier.weight(1f)) { buffer.mark("gender"); gender = "f" }
+                    GenderChoice("Не указан", gender == "u", Modifier.weight(1f)) { buffer.mark("gender"); gender = "u" }
                 }
             }
             Spacer(Modifier.height(12.dp))
             HdCard {
                 Text("Связи", color = HdTextPrimary, fontWeight = FontWeight.SemiBold)
                 Text("Отец, мать и супруги собирают поколение на главном экране.", color = HdTextSecondary, modifier = Modifier.padding(bottom = 8.dp))
-                RelationRow("Отец", tree.people.find { it.id == fatherId }?.fullName() ?: "не выбран", { picker = Picker.Father }, { fatherId = "" })
-                RelationRow("Мать", tree.people.find { it.id == motherId }?.fullName() ?: "не выбрана", { picker = Picker.Mother }, { motherId = "" })
+                RelationRow("Отец", tree.people.find { it.id == fatherId }?.fullName() ?: "не выбран", { picker = Picker.Father }, { buffer.mark("father"); fatherId = "" })
+                RelationRow("Мать", tree.people.find { it.id == motherId }?.fullName() ?: "не выбрана", { picker = Picker.Mother }, { buffer.mark("mother"); motherId = "" })
                 spouseDrafts.forEach { spouse ->
                     val name = tree.people.find { it.id == spouse.personId }?.fullName() ?: spouse.personId
                     RelationRow("Супруг", name, null) {
+                        buffer.mark("spouses")
                         spouseRaw = formatSpouseDrafts(spouseDrafts.filterNot { it.personId == spouse.personId })
                     }
                     HdTextField(
                         spouse.marriedOn,
                         { value ->
+                            buffer.mark("spouses")
                             spouseRaw = formatSpouseDrafts(
                                 spouseDrafts.map { if (it.personId == spouse.personId) it.copy(marriedOn = value) else it },
                             )
@@ -326,16 +416,16 @@ fun PersonEditorScreen(routeId: String, role: String, anchor: String, nav: NavHo
                         "Дата брака, ГГГГ-ММ-ДД",
                     )
                 }
-                HdSecondaryButton("Добавить супруга") { picker = Picker.Spouse }
+                HdSecondaryButton(addSpouseLabel(gender)) { picker = Picker.Spouse }
             }
             Spacer(Modifier.height(12.dp))
             HdCard {
                 Text("Даты и заметка", color = HdTextPrimary, fontWeight = FontWeight.SemiBold)
                 Spacer(Modifier.height(8.dp))
-                HdTextField(birthDate, { birthDate = it }, "Дата рождения, ГГГГ-ММ-ДД")
-                HdTextField(deathDate, { deathDate = it }, "Дата смерти, если есть")
-                HdTextField(birthPlace, { birthPlace = it }, "Место рождения")
-                HdTextField(notes, { notes = it }, "Заметка", singleLine = false)
+                HdTextField(birthDate, { buffer.mark("birthDate"); birthDate = it }, "Дата рождения, ГГГГ-ММ-ДД")
+                HdTextField(deathDate, { buffer.mark("deathDate"); deathDate = it }, "Дата смерти, если есть")
+                HdTextField(birthPlace, { buffer.mark("birthPlace"); birthPlace = it }, "Место рождения")
+                HdTextField(notes, { buffer.mark("notes"); notes = it }, "Заметка", singleLine = false)
             }
             Spacer(Modifier.height(12.dp))
             Text(status, color = HdTextSecondary)
@@ -358,19 +448,36 @@ fun PersonEditorScreen(routeId: String, role: String, anchor: String, nav: NavHo
                 Picker.Spouse -> addAll(spouseIds)
             }
         }
+        val candidates = tree.people.filter { person ->
+            person.id !in exclude && (which != Picker.Spouse || acceptsAsSpouse(gender, person.gender))
+        }
         PersonPickDialog(
             title = when (which) {
                 Picker.Father -> "Отец"
                 Picker.Mother -> "Мать"
-                Picker.Spouse -> "Супруг"
+                Picker.Spouse -> spouseNoun(gender)
             },
-            people = tree.people.filter { it.id !in exclude },
+            people = candidates,
+            emptyText = if (which == Picker.Spouse && tree.people.any { it.id !in exclude }) {
+                "Нет людей противоположного пола"
+            } else {
+                "Сначала добавьте других людей"
+            },
             onDismiss = { picker = null },
             onPick = { id ->
                 when (which) {
-                    Picker.Father -> fatherId = id
-                    Picker.Mother -> motherId = id
-                    Picker.Spouse -> spouseRaw = formatSpouseDrafts(spouseDrafts + SpouseDraft(id))
+                    Picker.Father -> {
+                        buffer.mark("father")
+                        fatherId = id
+                    }
+                    Picker.Mother -> {
+                        buffer.mark("mother")
+                        motherId = id
+                    }
+                    Picker.Spouse -> {
+                        buffer.mark("spouses")
+                        spouseRaw = formatSpouseDrafts(spouseDrafts + SpouseDraft(id))
+                    }
                 }
                 picker = null
             },
@@ -441,7 +548,7 @@ fun PersonDetailScreen(personId: String, nav: NavHostController) {
             HdSecondaryButton("Добавить мать") { nav.navigate(Routes.edit("new", "mother", person.id)) }
             Spacer(Modifier.height(8.dp))
         }
-        HdSecondaryButton("Добавить супруга") { nav.navigate(Routes.edit("new", "spouse", person.id)) }
+        HdSecondaryButton(addSpouseLabel(person.gender)) { nav.navigate(Routes.edit("new", "spouse", person.id)) }
         Spacer(Modifier.height(8.dp))
         HdSecondaryButton("Добавить ребёнка") { nav.navigate(Routes.edit("new", "child", person.id)) }
         Spacer(Modifier.height(12.dp))
@@ -505,10 +612,26 @@ private fun GenderChoice(text: String, active: Boolean, modifier: Modifier, onCl
 
 private enum class Picker { Father, Mother, Spouse }
 
+private class EditorBuffer {
+    var person: PersonEntity = PersonEntity(id = "")
+    var spouses: List<SpouseDraft> = emptyList()
+    var attach: RelativeAttach? = null
+    var touched: Set<String> = emptySet()
+    var hasName: Boolean = false
+    var ready: Boolean = false
+    var epoch: Int = 0
+
+    fun mark(field: String) {
+        if (field !in touched) touched = touched + field
+        epoch += 1
+    }
+}
+
 @Composable
 private fun PersonPickDialog(
     title: String,
     people: List<PersonEntity>,
+    emptyText: String,
     onDismiss: () -> Unit,
     onPick: (String) -> Unit,
 ) {
@@ -517,13 +640,12 @@ private fun PersonPickDialog(
         title = { Text(title) },
         text = {
             Column(Modifier.heightIn(max = 360.dp).verticalScroll(rememberScrollState())) {
-                if (people.isEmpty()) Text("Сначала добавьте других людей", color = HdTextSecondary)
+                if (people.isEmpty()) {
+                    Text(emptyText, color = HdTextSecondary)
+                }
                 people.sortedBy { it.fullName() }.forEach { person ->
-                    Text(
-                        person.fullName(),
-                        color = HdTextPrimary,
-                        modifier = Modifier.fillMaxWidth().clickable { onPick(person.id) }.padding(vertical = 10.dp),
-                    )
+                    HdSecondaryButton(person.fullName()) { onPick(person.id) }
+                    Spacer(Modifier.height(8.dp))
                 }
             }
         },

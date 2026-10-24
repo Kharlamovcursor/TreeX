@@ -64,6 +64,7 @@ import ru.hdlabs.treex.domain.fullName
 import ru.hdlabs.treex.domain.lifeLine
 import ru.hdlabs.treex.domain.matchesQuery
 import ru.hdlabs.treex.domain.spouseIdsOf
+import ru.hdlabs.treex.domain.spouseNoun
 import ru.hdlabs.treex.feedback.TelegramFeedback
 import ru.hdlabs.treex.navigation.Routes
 import ru.hdlabs.treex.ui.components.HdPrimaryButton
@@ -274,7 +275,7 @@ private fun Pedigree(
         item(key = "focus-${focus.id}") {
             PersonCard(focus, true, Modifier.width(168.dp)) { onOpen(focus) }
         }
-        item(key = "add-spouse") { AddSlot("Супруг") { onAdd("spouse", focus.id) } }
+        item(key = "add-spouse") { AddSlot(spouseNoun(focus.gender)) { onAdd("spouse", focus.id) } }
     }
     Spacer(Modifier.height(8.dp))
     HdSecondaryButton("Открыть карточку") { onOpen(focus) }

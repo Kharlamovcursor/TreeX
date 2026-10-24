@@ -110,6 +110,16 @@ fun PersonEntity.matchesQuery(query: String): Boolean {
     return query.trim().lowercase().split(Regex("\\s+")).all { it in haystack }
 }
 
+fun spouseNoun(gender: String): String = if (gender == "m") "Супруга" else "Супруг"
+
+fun addSpouseLabel(gender: String): String = if (gender == "m") "Добавить супругу" else "Добавить супруга"
+
+fun acceptsAsSpouse(hostGender: String, candidateGender: String): Boolean = when (hostGender) {
+    "m" -> candidateGender == "f"
+    "f" -> candidateGender == "m"
+    else -> true
+}
+
 fun spouseIdsOf(unions: List<UnionEntity>, personId: String): List<String> =
     unions.mapNotNull { union ->
         when (personId) {
