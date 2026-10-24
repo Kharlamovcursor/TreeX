@@ -1,0 +1,2 @@
+-keep class ru.hdlabs.treex.backup.** { *; }
+-keepattributes *Annotation*, Signature, InnerClasses, EnclosingMethod

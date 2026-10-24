@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<full-backup-content>
+    <exclude domain="database" path="treex.db" />
+    <exclude domain="database" path="treex.db-shm" />
+    <exclude domain="database" path="treex.db-wal" />
+    <exclude domain="file" path="photos" />
+    <exclude domain="file" path="history" />
+    <exclude domain="file" path="datastore" />
+</full-backup-content>
