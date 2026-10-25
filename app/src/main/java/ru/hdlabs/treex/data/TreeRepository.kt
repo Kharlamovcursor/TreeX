@@ -523,9 +523,9 @@ class TreeRepository(
             onSuccess = { snapshot ->
                 val remote = snapshot.remote
                     ?: return RemoteRefresh.Failed(
-                        "Не удалось загрузить древо из Git (${settings.githubOwner}/${settings.githubRepo}, " +
-                            "файл ${settings.githubPath}). Проверьте интернет и токен. " +
-                            "На основном телефоне убедитесь, что древо уже отправлено в Git.",
+                        "В Git нет файла «${settings.githubPath}» (${settings.githubOwner}/${settings.githubRepo}). " +
+                            "Если репозиторий только создан — на телефоне с древом нажмите «Отправить в Git сейчас». " +
+                            "Иначе проверьте интернет и токен.",
                     )
                 val remoteDoc = snapshot.remoteDoc
                     ?: return RemoteRefresh.Failed("Файл в Git не удалось прочитать")
@@ -573,7 +573,12 @@ class TreeRepository(
 
     suspend fun pushNow(): String {
         pushJob?.cancel()
-        return if (pushToGit(force = true)) "Древо отправлено в Git" else "Git уже совпадает с телефоном"
+        val settings = settingsRepository.settings.first()
+        return if (pushToGit(force = true)) {
+            "Древо отправлено в Git: ${settings.githubOwner}/${settings.githubRepo}, файл ${settings.githubPath}"
+        } else {
+            "Git уже совпадает с телефоном"
+        }
     }
 
     suspend fun remoteCommits(): List<GitHubTreeSync.RemoteCommit> {
@@ -673,7 +678,7 @@ class TreeRepository(
             throw IllegalStateException("Пустое древо нельзя отправлять в Git. Сначала загрузите древо из Git.")
         }
         val sync = syncFor(settings)
-        val remote = withContext(Dispatchers.IO) { sync.fetch() }
+        val remote = withContext(Dispatchers.IO) { sync.fetchForPush() }
         val localHash = TreeCodec.contentHash(localDoc)
         val marker = readMarker()
         if (remote != null) {

@@ -14,8 +14,8 @@ fun inspectGitRefresh(
         if (remoteCount > 0) return RemoteRefresh.Incoming(remoteCount)
         if (!remoteFilePresent) {
             return RemoteRefresh.Failed(
-                "На телефоне древо пустое, а файл в Git не найден. " +
-                    "На основном телефоне откройте настройки и отправьте древо в Git.",
+                "В Git пока нет файла древа. " +
+                    "На телефоне, где древо уже заполнено: «Настройки» → разработчик → «Отправить в Git сейчас».",
             )
         }
         return RemoteRefresh.Unchanged

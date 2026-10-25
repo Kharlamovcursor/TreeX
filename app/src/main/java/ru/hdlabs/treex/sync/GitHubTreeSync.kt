@@ -29,13 +29,21 @@ class GitHubTreeSync(
         require(token.isNotBlank()) { "Нет токена GitHub" }
     }
 
+    /** Загрузка с Git: пустой репозиторий — явная ошибка для пользователя. */
     fun fetch(): RemoteFile? {
-        fetchRef(branch, missingIsNull = true)?.let { return it }
-        return fetchFromRecentCommits()
+        fetchRef(branch, missingIsNull = true, lenientEmptyRepo = false)?.let { return it }
+        return fetchFromRecentCommits(lenientEmptyRepo = false)
+    }
+
+    /** Перед отправкой: пустой репозиторий считаем «файла ещё нет», push создаст первый коммит. */
+    fun fetchForPush(): RemoteFile? {
+        fetchRef(branch, missingIsNull = true, lenientEmptyRepo = true)?.let { return it }
+        return fetchFromRecentCommits(lenientEmptyRepo = true)
     }
 
     fun fetchExact(ref: String): RemoteFile =
-        fetchRef(ref, missingIsNull = false) ?: throw IllegalStateException("Версия в Git не найдена")
+        fetchRef(ref, missingIsNull = false, lenientEmptyRepo = false)
+            ?: throw IllegalStateException("Версия в Git не найдена")
 
     fun listCommits(): List<RemoteCommit> {
         val filePath = commitsPathQueryValue(path)
@@ -84,18 +92,28 @@ class GitHubTreeSync(
             ?: throw IllegalStateException("GitHub не вернул номер версии")
     }
 
-    private fun fetchFromRecentCommits(): RemoteFile? {
+    private fun fetchFromRecentCommits(lenientEmptyRepo: Boolean): RemoteFile? {
         val commits = runCatching { listCommits() }.getOrElse { emptyList() }
         for (commit in commits) {
-            fetchRef(commit.sha, missingIsNull = true)?.let { return it }
+            fetchRef(commit.sha, missingIsNull = true, lenientEmptyRepo = lenientEmptyRepo)?.let { return it }
         }
         return null
     }
 
-    private fun fetchRef(ref: String, missingIsNull: Boolean): RemoteFile? {
+    private fun fetchRef(ref: String, missingIsNull: Boolean, lenientEmptyRepo: Boolean): RemoteFile? {
         val url = "https://api.github.com/repos/$owner/$repo/contents/${encodedPath()}?ref=${encode(ref)}"
         val (code, body) = request("GET", url, null)
-        if (code == 404 && missingIsNull) return null
+        if (code == 404) {
+            val api = apiMessage(body)
+            if (api.contains("repository is empty", ignoreCase = true)) {
+                if (lenientEmptyRepo) return null
+                throw IllegalStateException(
+                    "Репозиторий $owner/$repo пуст — в Git ещё нет семейного древа. " +
+                        "На телефоне, где древо уже есть: «Настройки» → «Отправить в Git сейчас» (раздел разработчика).",
+                )
+            }
+            if (missingIsNull) return null
+        }
         if (code !in 200..299) throw IllegalStateException(githubMessage(code, body))
         val root = json.parseToJsonElement(body).jsonObject
         val encoded = root["content"]?.jsonPrimitive?.content
@@ -155,10 +173,12 @@ class GitHubTreeSync(
         return code to text
     }
 
+    private fun apiMessage(body: String): String = runCatching {
+        json.parseToJsonElement(body).jsonObject["message"]?.jsonPrimitive?.content.orEmpty()
+    }.getOrDefault("")
+
     private fun githubMessage(code: Int, body: String): String {
-        val api = runCatching {
-            json.parseToJsonElement(body).jsonObject["message"]?.jsonPrimitive?.content
-        }.getOrNull()
+        val api = apiMessage(body).takeIf { it.isNotBlank() }
         return when (code) {
             401 -> "GitHub не принял токен. Нужен токен с правом contents."
             403 -> api ?: "GitHub запретил доступ. Репозиторий должен быть доступен этому токену."
