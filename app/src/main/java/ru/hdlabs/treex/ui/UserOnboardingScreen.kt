@@ -67,6 +67,7 @@ fun UserOnboardingScreen() {
                         userMiddleName = capitalizePersonName(middleName),
                     )
                 }
+                app.container.treeRepository.syncTreeFromGitIfNeeded()
                 saving = false
             }
         }

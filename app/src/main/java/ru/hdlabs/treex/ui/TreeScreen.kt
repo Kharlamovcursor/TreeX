@@ -77,6 +77,7 @@ import ru.hdlabs.treex.domain.treeComponents
 import ru.hdlabs.treex.feedback.MaxFeedback
 import ru.hdlabs.treex.feedback.TelegramFeedback
 import ru.hdlabs.treex.navigation.Routes
+import ru.hdlabs.treex.util.NetworkHelper
 import ru.hdlabs.treex.ui.components.HdCard
 import ru.hdlabs.treex.ui.components.HdPrimaryButton
 import ru.hdlabs.treex.ui.components.HdLabsBrandTitle
@@ -112,6 +113,18 @@ fun TreeScreen(nav: NavHostController, highlight: String) {
     var showBranchConnectModes by remember { mutableStateOf(false) }
     var pendingBranchConnect by remember { mutableStateOf<Pair<String, BranchConnectMode>?>(null) }
     var actionsExpanded by rememberSaveable { mutableStateOf(false) }
+
+    LaunchedEffect(settings.gitConfigured, state.people.size) {
+        if (settings.gitConfigured && state.people.isEmpty()) {
+            when (val result = app.container.treeRepository.syncTreeFromGitIfNeeded()) {
+                is RemoteRefresh.Updated -> updatedMessage = "Древо загружено из Git: ${result.count} чел."
+                is RemoteRefresh.Failed -> if (!NetworkHelper.looksLikeNetworkIssue(result.message)) {
+                    updatedMessage = result.message
+                }
+                else -> Unit
+            }
+        }
+    }
 
     LaunchedEffect(highlight) {
         activeHighlight = highlight
@@ -163,10 +176,23 @@ fun TreeScreen(nav: NavHostController, highlight: String) {
                             is RemoteRefresh.Incoming -> updatedMessage = appliedGitMessage(
                                 app.container.treeRepository.refreshFromGit(),
                             )
-                            is RemoteRefresh.LocalAhead -> updatedMessage = app.container.treeRepository.pushNow()
+                            is RemoteRefresh.LocalAhead -> {
+                                updatedMessage = if (livingCount == 0) {
+                                    appliedGitMessage(app.container.treeRepository.refreshFromGit())
+                                } else {
+                                    runCatching { app.container.treeRepository.pushNow() }
+                                        .getOrElse { it.message ?: "Не удалось отправить в Git" }
+                                }
+                            }
                             is RemoteRefresh.Diverged -> gitChoice = result
                             is RemoteRefresh.Updated -> updatedMessage = "Информация обновлена. В древе ${result.count} чел."
-                            RemoteRefresh.Unchanged -> updatedMessage = "Телефон и Git уже совпадают."
+                            RemoteRefresh.Unchanged -> {
+                                updatedMessage = if (state.people.isEmpty() && settings.gitConfigured) {
+                                    appliedGitMessage(app.container.treeRepository.refreshFromGit())
+                                } else {
+                                    "Телефон и Git уже совпадают."
+                                }
+                            }
                             RemoteRefresh.NotConfigured -> updatedMessage =
                                 "Git не настроен. Откройте настройки и укажите репозиторий и токен."
                             is RemoteRefresh.Failed -> developerMessage = result.message

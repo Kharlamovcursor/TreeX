@@ -23,7 +23,24 @@ fun inspectGitRefresh(
     return when (relation) {
         GitRelation.Same -> RemoteRefresh.Unchanged
         GitRelation.RemoteNewer -> RemoteRefresh.Incoming(remoteCount)
-        GitRelation.LocalNewer, GitRelation.RemoteMissing -> RemoteRefresh.LocalAhead(localPeopleCount)
+        GitRelation.RemoteMissing -> {
+            if (localPeopleCount == 0) {
+                RemoteRefresh.Failed(
+                    "Не удалось прочитать древо из Git. Проверьте интернет и доступ к репозиторию.",
+                )
+            } else {
+                RemoteRefresh.Failed(
+                    "Git недоступен. Отправка отменена, чтобы не затереть семейное древо на сервере.",
+                )
+            }
+        }
+        GitRelation.LocalNewer -> {
+            if (remoteFilePresent && remoteCount > localPeopleCount) {
+                RemoteRefresh.Incoming(remoteCount)
+            } else {
+                RemoteRefresh.LocalAhead(localPeopleCount)
+            }
+        }
         GitRelation.Diverged -> RemoteRefresh.Diverged(remoteCount)
     }
 }

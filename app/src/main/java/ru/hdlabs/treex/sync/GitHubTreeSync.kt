@@ -29,7 +29,10 @@ class GitHubTreeSync(
         require(token.isNotBlank()) { "Нет токена GitHub" }
     }
 
-    fun fetch(): RemoteFile? = fetchRef(branch, missingIsNull = true)
+    fun fetch(): RemoteFile? {
+        fetchRef(branch, missingIsNull = true)?.let { return it }
+        return fetchFromRecentCommits()
+    }
 
     fun fetchExact(ref: String): RemoteFile =
         fetchRef(ref, missingIsNull = false) ?: throw IllegalStateException("Версия в Git не найдена")
@@ -79,6 +82,14 @@ class GitHubTreeSync(
         val root = json.parseToJsonElement(body).jsonObject
         return root["content"]?.jsonObject?.get("sha")?.jsonPrimitive?.content
             ?: throw IllegalStateException("GitHub не вернул номер версии")
+    }
+
+    private fun fetchFromRecentCommits(): RemoteFile? {
+        val commits = runCatching { listCommits() }.getOrElse { emptyList() }
+        for (commit in commits) {
+            fetchRef(commit.sha, missingIsNull = true)?.let { return it }
+        }
+        return null
     }
 
     private fun fetchRef(ref: String, missingIsNull: Boolean): RemoteFile? {

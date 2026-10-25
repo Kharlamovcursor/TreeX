@@ -438,7 +438,15 @@ class TreeRepository(
         schedulePush()
     }
 
-    suspend fun pullFromGitOnLaunch(): RemoteRefresh? {
+    suspend fun syncTreeFromGitIfNeeded(): RemoteRefresh {
+        val settings = settingsRepository.settings.first()
+        if (!settings.gitConfigured) return RemoteRefresh.NotConfigured
+        val empty = mutex.withLock { readLocked().people.isEmpty() }
+        if (!empty) return RemoteRefresh.Unchanged
+        return pullFromGitOnLaunch(forceEmptyLocal = true) ?: RemoteRefresh.Unchanged
+    }
+
+    suspend fun pullFromGitOnLaunch(forceEmptyLocal: Boolean = false): RemoteRefresh? {
         val settings = settingsRepository.settings.first()
         if (!settings.gitConfigured) return null
         repeat(5) { attempt ->
@@ -462,6 +470,12 @@ class TreeRepository(
                     if (NetworkHelper.looksLikeNetworkIssue(status.message) && attempt < 4) {
                         delay(2_000L)
                         return@repeat
+                    }
+                    return status
+                }
+                is RemoteRefresh.Unchanged -> {
+                    if (forceEmptyLocal && mutex.withLock { readLocked().people.isEmpty() }) {
+                        return refreshFromGit()
                     }
                     return status
                 }
@@ -503,11 +517,16 @@ class TreeRepository(
     }
 
     suspend fun refreshFromGit(): RemoteRefresh {
+        val settings = settingsRepository.settings.first()
         val look = lookAtGit() ?: return RemoteRefresh.NotConfigured
         return look.fold(
             onSuccess = { snapshot ->
                 val remote = snapshot.remote
-                    ?: return RemoteRefresh.Failed("В репозитории ещё нет файла древа. Отправьте древо кнопкой в настройках.")
+                    ?: return RemoteRefresh.Failed(
+                        "Не удалось загрузить древо из Git (${settings.githubOwner}/${settings.githubRepo}, " +
+                            "файл ${settings.githubPath}). Проверьте интернет и токен. " +
+                            "На основном телефоне убедитесь, что древо уже отправлено в Git.",
+                    )
                 val remoteDoc = snapshot.remoteDoc
                     ?: return RemoteRefresh.Failed("Файл в Git не удалось прочитать")
                 val localEmpty = snapshot.local.people.isEmpty()
@@ -613,6 +632,8 @@ class TreeRepository(
             delay(10_000)
             val settings = settingsRepository.settings.first()
             if (!settings.gitConfigured) return@launch
+            val peopleCount = mutex.withLock { peopleDao.all().count { !it.vacant } }
+            if (peopleCount == 0) return@launch
             runCatching { pushToGit(force = false) }
                 .onSuccess { syncNoteState.value = null }
                 .onFailure { error ->
@@ -646,12 +667,24 @@ class TreeRepository(
         val settings = settingsRepository.settings.first()
         if (!settings.gitConfigured) throw IllegalStateException("Git не настроен")
         val captured = mutex.withLock { generation to TreeCodec.encode(readLocked()) }
+        val localDoc = TreeCodec.decode(captured.second)
+        val localCount = localDoc.people.size
+        if (localCount == 0) {
+            throw IllegalStateException("Пустое древо нельзя отправлять в Git. Сначала загрузите древо из Git.")
+        }
         val sync = syncFor(settings)
         val remote = withContext(Dispatchers.IO) { sync.fetch() }
-        val localHash = TreeCodec.contentHash(TreeCodec.decode(captured.second))
+        val localHash = TreeCodec.contentHash(localDoc)
         val marker = readMarker()
         if (remote != null) {
-            val remoteHash = TreeCodec.contentHash(TreeCodec.decode(remote.text))
+            val remoteDoc = TreeCodec.decode(remote.text)
+            val remoteCount = remoteDoc.people.size
+            if (remoteCount > 0 && localCount < remoteCount && !force) {
+                throw IllegalStateException(
+                    "В Git $remoteCount чел., на телефоне $localCount. Сначала загрузите древо из Git — иначе можно стереть семейные данные.",
+                )
+            }
+            val remoteHash = TreeCodec.contentHash(remoteDoc)
             if (remoteHash == localHash) {
                 writeMarker(remote.sha, localHash)
                 return false
@@ -660,6 +693,10 @@ class TreeRepository(
             if (!force && (relation == GitRelation.RemoteNewer || relation == GitRelation.Diverged)) {
                 throw IllegalStateException("В Git другая версия. На главном экране нажмите обновление и выберите: загрузить Git или отправить телефон.")
             }
+        } else if (!force) {
+            throw IllegalStateException(
+                "Не удалось прочитать древо из Git. Автоотправка отменена, чтобы не затереть семейное древо.",
+            )
         }
         val stillCurrent = mutex.withLock { generation == captured.first }
         if (!stillCurrent) {

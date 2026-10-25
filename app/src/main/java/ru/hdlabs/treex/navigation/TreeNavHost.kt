@@ -85,7 +85,8 @@ fun TreeNavHost() {
         return
     }
 
-    LaunchedEffect(Unit) {
+    LaunchedEffect(settings.userProfileComplete) {
+        if (!settings.userProfileComplete) return@LaunchedEffect
         launch {
             repeat(4) { attempt ->
                 if (attempt > 0) delay(2_500L)
@@ -105,7 +106,7 @@ fun TreeNavHost() {
             }
         }
         launch {
-            val git = runCatching { app.container.treeRepository.pullFromGitOnLaunch() }
+            val git = runCatching { app.container.treeRepository.syncTreeFromGitIfNeeded() }
                 .onFailure { error ->
                     AppEventLog.error("git", "Сбой синхронизации при запуске", error)
                 }
@@ -114,7 +115,7 @@ fun TreeNavHost() {
                 is RemoteRefresh.Diverged -> pendingGit = git
                 is RemoteRefresh.Updated -> {
                     AppEventLog.info("git", "Автообновление при запуске: ${git.count} чел.")
-                    gitNotice = "Древо обновлено из Git: ${git.count} чел."
+                    gitNotice = "Древо загружено из Git: ${git.count} чел."
                 }
                 is RemoteRefresh.Failed -> {
                     if (!NetworkHelper.looksLikeNetworkIssue(git.message)) {

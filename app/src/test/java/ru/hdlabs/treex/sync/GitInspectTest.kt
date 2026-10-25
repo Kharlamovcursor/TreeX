@@ -27,4 +27,15 @@ class GitInspectTest {
         )
         assertTrue(result is RemoteRefresh.Failed)
     }
+
+    @Test
+    fun localNewerWithSmallerTreePullsFromGit() {
+        val result = inspectGitRefresh(
+            localPeopleCount = 1,
+            remotePeopleCount = 50,
+            remoteFilePresent = true,
+            relation = GitRelation.LocalNewer,
+        )
+        assertTrue(result is RemoteRefresh.Incoming)
+    }
 }
