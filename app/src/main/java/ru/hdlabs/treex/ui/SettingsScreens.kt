@@ -146,7 +146,7 @@ fun SettingsScreen(nav: NavHostController) {
             )
         }
         Spacer(Modifier.height(12.dp))
-        HdSecondaryButton("Справка по древу") { nav.navigate(Routes.TREE_HELP) }
+        HdSecondaryButton("Инструкция") { nav.navigate(Routes.USER_GUIDE) }
         Spacer(Modifier.height(12.dp))
         HdSecondaryButton("Настройки разработчика") { nav.navigate(Routes.DEVELOPER_SETTINGS) }
     }
