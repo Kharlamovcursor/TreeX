@@ -574,6 +574,11 @@ fun PersonDetailScreen(personId: String, nav: NavHostController) {
         Spacer(Modifier.height(12.dp))
         HdPrimaryButton("Редактировать") { nav.navigate(Routes.edit(person.id)) }
         Spacer(Modifier.height(8.dp))
+        Text(
+            "В редакторе блок «К кому относится»: отец, мать, супруг — выбрать или убрать.",
+            color = HdTextSecondary,
+        )
+        Spacer(Modifier.height(8.dp))
         HdSecondaryButton("Удалить карточку") { confirmDelete = true }
     }
     if (confirmDelete) {

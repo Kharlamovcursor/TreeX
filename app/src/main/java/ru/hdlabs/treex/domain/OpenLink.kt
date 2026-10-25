@@ -5,6 +5,26 @@ import ru.hdlabs.treex.data.local.PersonEntity
 import ru.hdlabs.treex.data.local.UnionEntity
 import java.util.UUID
 
+fun describeOpenLink(link: OpenLink, people: List<PersonEntity>): String {
+    val byId = people.associateBy { it.id }
+    fun name(id: String) = byId[id]?.fullName() ?: "человек"
+    return when (link.slot) {
+        "spouse" -> "Связь супругов у ${name(link.ownerId)} — укажите нового супруга"
+        "father" -> "Отец для ${name(link.ownerId)} — выберите человека"
+        "mother" -> "Мать для ${name(link.ownerId)} — выберите человека"
+        "bridge" -> {
+            val kids = link.childIds.map { name(it) }.joinToString(", ")
+            val anchor = name(link.anchorId)
+            if (link.anchorIsParent) {
+                "Дети ($kids) без одного родителя — прикрепите к $anchor или к другому родителю"
+            } else {
+                "После удаления: дети ($kids) и супруг $anchor — прикрепите линию к нужной карточке"
+            }
+        }
+        else -> "Свободная связь — выберите карточку на древе"
+    }
+}
+
 @Serializable
 data class OpenLink(
     val id: String,

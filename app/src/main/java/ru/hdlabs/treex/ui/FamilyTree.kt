@@ -1,13 +1,18 @@
 package ru.hdlabs.treex.ui
 
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.calculateCentroid
 import androidx.compose.foundation.gestures.calculatePan
@@ -30,10 +35,10 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -42,6 +47,7 @@ import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
@@ -58,6 +64,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.zIndex
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.launch
 import ru.hdlabs.treex.data.local.PersonEntity
 import ru.hdlabs.treex.data.local.UnionEntity
 import ru.hdlabs.treex.domain.OpenLink
@@ -84,15 +93,19 @@ fun FamilyTree(
     pendingLinkId: String?,
     modifier: Modifier = Modifier,
     onSelect: (PersonEntity) -> Unit,
+    onOpenDetail: (PersonEntity) -> Unit,
     onHoldLink: (String) -> Unit,
 ) {
     val placement = remember(people, unions, openLinks) { TreeLayout.place(people, unions, openLinks) }
     val byId = remember(people) { people.associateBy { it.id } }
     val density = LocalDensity.current
-    var scale by remember { mutableFloatStateOf(1f) }
-    var offset by remember { mutableStateOf(Offset.Zero) }
+    val scaleAnim = remember { Animatable(1f) }
+    val offsetXAnim = remember { Animatable(0f) }
+    val offsetYAnim = remember { Animatable(0f) }
+    val gestureScope = rememberCoroutineScope()
     var refit by remember { mutableIntStateOf(0) }
     val ids = remember(people) { people.map { it.id }.sorted().joinToString(",") }
+    val focusSpring = spring<Float>(dampingRatio = 0.84f, stiffness = Spring.StiffnessMediumLow)
 
     BoxWithConstraints(modifier.fillMaxSize()) {
         val viewW = with(density) { maxWidth.toPx() }
@@ -105,19 +118,38 @@ fun FamilyTree(
             min(viewW / contentW, viewH / contentH).coerceIn(0.2f, 1f)
         }
 
-        LaunchedEffect(ids, viewW, viewH, refit) {
-            if (viewW <= 1f || viewH <= 1f) return@LaunchedEffect
-            scale = fit
-            offset = Offset((viewW - contentW * fit) / 2f, (viewH - contentH * fit) / 2f)
+        suspend fun fitAll() {
+            scaleAnim.snapTo(fit)
+            offsetXAnim.snapTo((viewW - contentW * fit) / 2f)
+            offsetYAnim.snapTo((viewH - contentH * fit) / 2f)
         }
-        LaunchedEffect(centerToken) {
-            if (centerToken == 0) return@LaunchedEffect
-            val card = placement.cards.find { it.id == selectedId } ?: return@LaunchedEffect
-            val next = 1f.coerceAtLeast(fit).coerceAtMost(1.4f)
+
+        suspend fun focusCard(cardId: String, zoomIn: Boolean) {
+            if (viewW <= 1f || viewH <= 1f) return
+            val card = placement.cards.find { it.id == cardId } ?: return
+            val targetScale = if (zoomIn) {
+                min(fit * 1.45f, 1.7f).coerceAtLeast(fit)
+            } else {
+                fit
+            }
             val centerX = with(density) { (card.left + TreeLayout.CARD_W / 2f).dp.toPx() }
             val centerY = with(density) { (card.top + card.height / 2f).dp.toPx() }
-            scale = next
-            offset = Offset(viewW / 2f - centerX * next, viewH / 2f - centerY * next)
+            val targetOffsetX = viewW / 2f - centerX * targetScale
+            val targetOffsetY = viewH / 2f - centerY * targetScale
+            coroutineScope {
+                launch { scaleAnim.animateTo(targetScale, focusSpring) }
+                launch { offsetXAnim.animateTo(targetOffsetX, focusSpring) }
+                launch { offsetYAnim.animateTo(targetOffsetY, focusSpring) }
+            }
+        }
+
+        LaunchedEffect(ids, viewW, viewH, refit) {
+            if (viewW <= 1f || viewH <= 1f) return@LaunchedEffect
+            fitAll()
+        }
+        LaunchedEffect(selectedId, ids, centerToken) {
+            if (selectedId.isBlank()) return@LaunchedEffect
+            focusCard(selectedId, zoomIn = true)
         }
 
         Box(
@@ -126,37 +158,48 @@ fun FamilyTree(
                 .clipToBounds()
                 .treeTransform { zoom, pan, centroid ->
                     val minScale = min(0.35f, fit).coerceAtLeast(0.12f)
-                    val next = (scale * zoom).coerceIn(minScale, 2.6f)
-                    val applied = if (scale == 0f) 1f else next / scale
-                    offset = centroid - (centroid - offset) * applied + pan
-                    scale = next
+                    val next = (scaleAnim.value * zoom).coerceIn(minScale, 2.6f)
+                    val applied = if (scaleAnim.value == 0f) 1f else next / scaleAnim.value
+                    val current = Offset(offsetXAnim.value, offsetYAnim.value)
+                    val shifted = centroid - (centroid - current) * applied + pan
+                    gestureScope.launch {
+                        scaleAnim.snapTo(next)
+                        offsetXAnim.snapTo(shifted.x)
+                        offsetYAnim.snapTo(shifted.y)
+                    }
                 },
         ) {
             Box(
                 Modifier.graphicsLayer {
-                    translationX = offset.x
-                    translationY = offset.y
-                    scaleX = scale
-                    scaleY = scale
+                    translationX = offsetXAnim.value
+                    translationY = offsetYAnim.value
+                    scaleX = scaleAnim.value
+                    scaleY = scaleAnim.value
                     transformOrigin = TransformOrigin(0f, 0f)
                 },
             ) {
                 TreeLinks(placement, Modifier.width(placement.width.dp).height(placement.height.dp))
                 placement.cards.forEach { card ->
                     val person = byId[card.id] ?: return@forEach
+                    val selected = person.id == selectedId
                     TreeNode(
                         person = person,
-                        selected = person.id == selectedId,
+                        selected = selected,
                         fresh = person.id == freshId,
                         height = card.height,
-                        modifier = Modifier.offset(card.left.dp, card.top.dp),
-                        onClick = { onSelect(person) },
+                        modifier = Modifier
+                            .offset(card.left.dp, card.top.dp)
+                            .zIndex(if (selected) 2f else 0f),
+                        onSelect = { onSelect(person) },
+                        onOpenDetail = { onOpenDetail(person) },
                     )
                 }
                 placement.knots.forEach { knot ->
                     LinkHandle(
                         active = knot.linkId == pendingLinkId,
-                        modifier = Modifier.offset((knot.x - 18f).dp, (knot.y - 18f).dp),
+                        modifier = Modifier
+                            .offset((knot.x - 22f).dp, (knot.y - 22f).dp)
+                            .zIndex(1f),
                         onHold = { onHoldLink(knot.linkId) },
                     )
                 }
@@ -177,7 +220,7 @@ private fun TreeLinks(placement: TreePlacement, modifier: Modifier = Modifier) {
     val phase by rememberInfiniteTransition(label = "links").animateFloat(
         initialValue = 0f,
         targetValue = 64f,
-        animationSpec = infiniteRepeatable(tween(1700, easing = LinearEasing)),
+        animationSpec = infiniteRepeatable(tween(2400, easing = LinearEasing)),
         label = "dash",
     )
     Canvas(modifier) {
@@ -189,15 +232,15 @@ private fun TreeLinks(placement: TreePlacement, modifier: Modifier = Modifier) {
             return Rect(left, top, left + cardW, top + card.height.dp.toPx())
         }
         fun drawElegant(path: Path, color: Color, open: Boolean) {
-            val width = if (open) 2.2.dp.toPx() else 2.8.dp.toPx()
-            drawPath(path, color.copy(alpha = 0.18f), style = Stroke(width + 7.dp.toPx(), cap = StrokeCap.Round))
+            val width = if (open) 2f else 2.4.dp.toPx()
+            drawPath(path, color.copy(alpha = 0.12f), style = Stroke(width + 6.dp.toPx(), cap = StrokeCap.Round))
             drawPath(
                 path,
-                color,
+                color.copy(alpha = 0.82f),
                 style = Stroke(
                     width = width,
                     cap = StrokeCap.Round,
-                    pathEffect = PathEffect.dashPathEffect(floatArrayOf(if (open) 8f else 16f, if (open) 12f else 14f), phase),
+                    pathEffect = PathEffect.dashPathEffect(floatArrayOf(if (open) 10f else 18f, if (open) 14f else 16f), phase),
                 ),
             )
         }
@@ -235,20 +278,38 @@ private fun TreeLinks(placement: TreePlacement, modifier: Modifier = Modifier) {
                 quadraticBezierTo((from.x + to.x) / 2f, (from.y + to.y) / 2f - lift, to.x, to.y)
             }
             drawElegant(path, HdOrange, open = false)
-            drawCircle(HdOrange, 5.dp.toPx(), Offset((from.x + to.x) / 2f, (from.y + to.y) / 2f - lift))
+            drawCircle(HdOrange.copy(alpha = 0.85f), 4.5.dp.toPx(), Offset((from.x + to.x) / 2f, (from.y + to.y) / 2f - lift))
         }
     }
 }
 
 @Composable
 private fun LinkHandle(active: Boolean, modifier: Modifier = Modifier, onHold: () -> Unit) {
+    val pulse by rememberInfiniteTransition(label = "linkPulse").animateFloat(
+        initialValue = 0.85f,
+        targetValue = 1.15f,
+        animationSpec = infiniteRepeatable(tween(900, easing = FastOutSlowInEasing), RepeatMode.Reverse),
+        label = "linkPulseScale",
+    )
     Box(
         modifier
-            .size(36.dp)
-            .pointerInput(onHold) { detectTapGestures(onLongPress = { onHold() }, onTap = { onHold() }) }
+            .size(44.dp)
+            .graphicsLayer {
+                val scale = if (active) pulse else 1f
+                scaleX = scale
+                scaleY = scale
+            }
+            .pointerInput(onHold) {
+                detectTapGestures(
+                    onLongPress = { onHold() },
+                    onTap = { onHold() },
+                )
+            }
             .drawBehind {
-                drawCircle(if (active) HdOrange else HdOrange.copy(alpha = 0.35f), radius = size.minDimension / 2f)
-                drawCircle(Color.White, radius = size.minDimension / 5f)
+                val r = size.minDimension / 2f
+                drawCircle(HdOrange.copy(alpha = if (active) 0.45f else 0.22f), radius = r + 4.dp.toPx())
+                drawCircle(if (active) HdOrange else HdOrange.copy(alpha = 0.55f), radius = r)
+                drawCircle(Color.White, radius = r / 4.5f)
             },
     )
 }
@@ -260,14 +321,40 @@ private fun TreeNode(
     fresh: Boolean,
     height: Float,
     modifier: Modifier = Modifier,
-    onClick: () -> Unit,
+    onSelect: () -> Unit,
+    onOpenDetail: () -> Unit,
 ) {
-    GenderFrame(person.gender, selected || fresh, modifier.width(TreeLayout.CARD_W.dp).height(height.dp)) {
+    val lift by animateFloatAsState(
+        targetValue = if (selected) 1.1f else 1f,
+        animationSpec = spring(dampingRatio = 0.78f, stiffness = Spring.StiffnessMediumLow),
+        label = "cardLift",
+    )
+    GenderFrame(
+        gender = person.gender,
+        emphasized = selected || fresh,
+        modifier = modifier
+            .width(TreeLayout.CARD_W.dp)
+            .height(height.dp)
+            .graphicsLayer {
+                scaleX = lift
+                scaleY = lift
+                transformOrigin = TransformOrigin.Center
+            },
+    ) {
         Card(
-            modifier = Modifier.fillMaxSize().padding(3.dp).clickable(onClick = onClick),
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(3.dp)
+                .pointerInput(person.id) {
+                    detectTapGestures(
+                        onTap = { onSelect() },
+                        onDoubleTap = { onOpenDetail() },
+                    )
+                },
             shape = RoundedCornerShape(14.dp),
             colors = CardDefaults.cardColors(containerColor = HdPanelElevated.copy(alpha = 0.96f)),
             border = BorderStroke(0.dp, Color.Transparent),
+            elevation = CardDefaults.cardElevation(defaultElevation = if (selected) 10.dp else 2.dp),
         ) {
             Column(
                 Modifier.padding(horizontal = 8.dp, vertical = 8.dp),
@@ -298,26 +385,65 @@ private fun GenderFrame(
     modifier: Modifier = Modifier,
     content: @Composable () -> Unit,
 ) {
-    val turn by rememberInfiniteTransition(label = "frame").animateFloat(
+    val shimmer = rememberInfiniteTransition(label = "shimmer")
+    val turn by shimmer.animateFloat(
         initialValue = 0f,
         targetValue = 360f,
-        animationSpec = infiniteRepeatable(tween(if (gender == "f") 2600 else 3200, easing = LinearEasing)),
+        animationSpec = infiniteRepeatable(
+            animation = tween(if (gender == "f") 12000 else 14000, easing = LinearEasing),
+        ),
         label = "turn",
     )
+    val glow by shimmer.animateFloat(
+        initialValue = 0.32f,
+        targetValue = 0.58f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(4200, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse,
+        ),
+        label = "glow",
+    )
     val colors = when (gender) {
-        "f" -> listOf(Color(0xFFFFB3C7), Color(0xFFFF4D8D), Color(0xFFFF1744), Color(0xFFE91E63), Color(0xFFFFB3C7))
-        "m" -> listOf(Color(0xFFB3D4FF), Color(0xFF1565C0), Color(0xFF0D47A1), Color(0xFF00B4FF), Color(0xFFB3D4FF))
-        else -> listOf(HdBlue, HdOrange, HdBlue)
+        "f" -> listOf(
+            Color(0xFFFFD6E3),
+            Color(0xFFFF6B9D),
+            Color(0xFFFF1744),
+            Color(0xFFC2185B),
+            Color(0xFFFFD6E3),
+        )
+        "m" -> listOf(
+            Color(0xFFB8D9FF),
+            Color(0xFF1E88E5),
+            Color(0xFF0D47A1),
+            Color(0xFF1565C0),
+            Color(0xFFB8D9FF),
+        )
+        else -> listOf(HdBlue.copy(alpha = 0.5f), HdOrange, HdBlue.copy(alpha = 0.5f))
     }
+    val stroke = with(androidx.compose.ui.platform.LocalDensity.current) {
+        if (emphasized) 2.8.dp.toPx() else 2.2.dp.toPx()
+    }
+    val corner = with(androidx.compose.ui.platform.LocalDensity.current) { 16.dp.toPx() }
     Box(
-        modifier.drawBehind {
+        modifier = modifier.drawBehind {
+            val frameSize = Size(size.width, size.height)
+            val alpha = if (emphasized) glow.coerceIn(0.48f, 0.82f) else glow.coerceIn(0.22f, 0.42f)
             rotate(turn, pivot = center) {
                 drawRoundRect(
-                    brush = Brush.sweepGradient(colors),
-                    style = Stroke(width = if (emphasized) 4.dp.toPx() else 3.dp.toPx()),
-                    cornerRadius = CornerRadius(18.dp.toPx()),
+                    brush = Brush.sweepGradient(colors.map { it.copy(alpha = alpha) }),
+                    topLeft = Offset(stroke / 2f, stroke / 2f),
+                    size = Size(frameSize.width - stroke, frameSize.height - stroke),
+                    cornerRadius = CornerRadius(corner, corner),
+                    style = Stroke(width = stroke),
                 )
             }
+            drawRoundRect(
+                color = colors[1].copy(alpha = alpha * 0.12f),
+                topLeft = Offset(stroke, stroke),
+                size = Size(frameSize.width - stroke * 2f, frameSize.height - stroke * 2f),
+                cornerRadius = CornerRadius(corner, corner),
+                style = Stroke(width = stroke * 2.2f),
+            )
         },
     ) {
         content()

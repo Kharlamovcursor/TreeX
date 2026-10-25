@@ -7,11 +7,13 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
@@ -60,9 +62,11 @@ import ru.hdlabs.treex.domain.lifeLine
 import ru.hdlabs.treex.domain.matchesQuery
 import ru.hdlabs.treex.domain.addSpouseLabel
 import ru.hdlabs.treex.domain.OpenLink
+import ru.hdlabs.treex.domain.describeOpenLink
 import ru.hdlabs.treex.feedback.MaxFeedback
 import ru.hdlabs.treex.feedback.TelegramFeedback
 import ru.hdlabs.treex.navigation.Routes
+import ru.hdlabs.treex.ui.components.HdCard
 import ru.hdlabs.treex.ui.components.HdPrimaryButton
 import ru.hdlabs.treex.ui.components.HdScaffold
 import ru.hdlabs.treex.ui.components.HdSecondaryButton
@@ -92,6 +96,7 @@ fun TreeScreen(nav: NavHostController, highlight: String) {
     var centerToken by remember { mutableIntStateOf(0) }
     var pendingLinkId by remember { mutableStateOf<String?>(null) }
     var confirmDelete by remember { mutableStateOf(false) }
+    var showOpenLinks by remember { mutableStateOf(false) }
 
     LaunchedEffect(highlight) {
         activeHighlight = highlight
@@ -153,7 +158,8 @@ fun TreeScreen(nav: NavHostController, highlight: String) {
             )
             if (state.people.isNotEmpty()) {
                 Text(
-                    "Двумя пальцами уменьшайте и увеличивайте. Оранжевая линия — супруги, синяя — дети. Контур переливается: розовый у женщин, синий у мужчин.",
+                    "Тап — выбор и приближение, два тапа — карточка человека. Внизу экрана: изменить, удалить, добавить родственников. " +
+                        "Оранжевая линия — супруги, синяя — дети; после удаления человека свободную связь переносят оранжевой точкой на линии или кнопкой «Свободные связи».",
                     color = HdTextSecondary,
                     modifier = Modifier.padding(top = 4.dp),
                 )
@@ -200,28 +206,20 @@ fun TreeScreen(nav: NavHostController, highlight: String) {
                                 scope.launch { app.container.treeRepository.attachOpenLink(linkId, person.id) }
                             } else {
                                 focusId = person.id
+                                centerToken += 1
                             }
                         },
+                        onOpenDetail = { nav.navigate(Routes.person(it.id)) },
                         onHoldLink = { pendingLinkId = it },
                     )
-                    if (pendingLinkId != null) {
-                        Text(
-                            "Нажмите карточку, к которой прикрепить эту связь.",
-                            color = HdOrange,
-                            modifier = Modifier.padding(top = 4.dp),
-                        )
-                    } else if (openLinks.isNotEmpty()) {
-                        Text(
-                            "Свободную точку на линии удержите и перенесите на другую карточку.",
-                            color = HdTextSecondary,
-                            modifier = Modifier.padding(top = 4.dp),
-                        )
-                    }
-                    PersonActions(
+                    FocusActionPanel(
                         focus = focus,
                         people = state.people,
+                        openLinks = openLinks,
+                        pendingLinkId = pendingLinkId,
                         isHome = focus.id == settings.homePersonId,
-                        onOpen = { nav.navigate(Routes.edit(focus.id)) },
+                        onOpenEditor = { nav.navigate(Routes.edit(focus.id)) },
+                        onOpenDetail = { nav.navigate(Routes.person(focus.id)) },
                         onAdd = { role, anchor -> nav.navigate(Routes.edit("new", role, anchor)) },
                         onDelete = { confirmDelete = true },
                         onMakeHome = {
@@ -229,6 +227,8 @@ fun TreeScreen(nav: NavHostController, highlight: String) {
                                 app.container.settingsRepository.update { it.copy(homePersonId = focus.id) }
                             }
                         },
+                        onShowOpenLinks = { showOpenLinks = true },
+                        onCancelLinkPick = { pendingLinkId = null },
                     )
                 }
             }
@@ -293,6 +293,31 @@ fun TreeScreen(nav: NavHostController, highlight: String) {
             },
         )
     }
+    if (showOpenLinks && openLinks.isNotEmpty()) {
+        AlertDialog(
+            onDismissRequest = { showOpenLinks = false },
+            title = { Text("Свободные связи") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text(
+                        "После удаления карточки линия остаётся «висящей». Выберите связь и нажмите «Прикрепить», затем тапните нужную карточку на древе. " +
+                            "Или нажмите оранжевую точку прямо на линии.",
+                        color = HdTextSecondary,
+                    )
+                    openLinks.forEach { link ->
+                        Column {
+                            Text(describeOpenLink(link, state.people), color = HdTextPrimary)
+                            HdSecondaryButton("Прикрепить к карточке") {
+                                pendingLinkId = link.id
+                                showOpenLinks = false
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = { HdPrimaryButton("Закрыть") { showOpenLinks = false } },
+        )
+    }
     if (confirmDelete && focus != null) {
         val name = focus.fullName()
         AlertDialog(
@@ -333,27 +358,62 @@ private fun appliedGitMessage(result: RemoteRefresh): String = when (result) {
 }
 
 @Composable
-private fun PersonActions(
+private fun FocusActionPanel(
     focus: PersonEntity,
     people: List<PersonEntity>,
+    openLinks: List<OpenLink>,
+    pendingLinkId: String?,
     isHome: Boolean,
-    onOpen: () -> Unit,
+    onOpenEditor: () -> Unit,
+    onOpenDetail: () -> Unit,
     onAdd: (role: String, anchor: String) -> Unit,
     onDelete: () -> Unit,
     onMakeHome: () -> Unit,
+    onShowOpenLinks: () -> Unit,
+    onCancelLinkPick: () -> Unit,
 ) {
     val known = people.map { it.id }.toSet()
-    Text(focus.fullName(), color = HdTextPrimary, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center)
-    Spacer(Modifier.height(6.dp))
-    Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        TreeAction("Изменить", primary = true, onClick = onOpen)
-        if (focus.fatherId !in known) TreeAction("Добавить отца") { onAdd("father", focus.id) }
-        if (focus.motherId !in known) TreeAction("Добавить мать") { onAdd("mother", focus.id) }
-        TreeAction(addSpouseLabel(focus.gender)) { onAdd("spouse", focus.id) }
-        TreeAction("Добавить ребёнка") { onAdd("child", focus.id) }
-        TreeAction("Без родства") { onAdd("", "") }
-        if (!isHome) TreeAction("Сделать главным", onClick = onMakeHome)
-        TreeAction("Удалить", onClick = onDelete)
+    HdCard(Modifier.fillMaxWidth().padding(top = 6.dp)) {
+        Text(focus.fullName(), color = HdTextPrimary, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
+        Spacer(Modifier.height(8.dp))
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Box(Modifier.weight(1f)) { HdPrimaryButton("Изменить") { onOpenEditor() } }
+            Box(Modifier.weight(1f)) { HdSecondaryButton("Карточка") { onOpenDetail() } }
+        }
+        Spacer(Modifier.height(8.dp))
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Box(Modifier.weight(1f)) {
+                HdSecondaryButton("Удалить") { onDelete() }
+            }
+            if (!isHome) {
+                Box(Modifier.weight(1f)) {
+                    HdSecondaryButton("Главный") { onMakeHome() }
+                }
+            }
+        }
+        Text(
+            "В «Изменить» — отец, мать, супруг: выбрать или убрать связь.",
+            color = HdTextSecondary,
+            modifier = Modifier.padding(top = 8.dp),
+        )
+        if (pendingLinkId != null) {
+            Spacer(Modifier.height(8.dp))
+            Text("Тапните карточку на древе, к которой прикрепить связь.", color = HdOrange)
+            HdSecondaryButton("Отменить перенос") { onCancelLinkPick() }
+        } else if (openLinks.isNotEmpty()) {
+            Spacer(Modifier.height(8.dp))
+            HdSecondaryButton("Свободные связи (${openLinks.size})") { onShowOpenLinks() }
+        }
+        Spacer(Modifier.height(8.dp))
+        Text("Добавить родственника", color = HdTextPrimary, fontWeight = FontWeight.SemiBold)
+        Spacer(Modifier.height(6.dp))
+        Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            if (focus.fatherId !in known) TreeAction("Отец") { onAdd("father", focus.id) }
+            if (focus.motherId !in known) TreeAction("Мать") { onAdd("mother", focus.id) }
+            TreeAction(addSpouseLabel(focus.gender)) { onAdd("spouse", focus.id) }
+            TreeAction("Ребёнок") { onAdd("child", focus.id) }
+            TreeAction("Без родства") { onAdd("", "") }
+        }
     }
 }
 

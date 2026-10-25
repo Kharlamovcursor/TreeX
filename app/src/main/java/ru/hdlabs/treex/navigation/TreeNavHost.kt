@@ -1,8 +1,11 @@
 package ru.hdlabs.treex.navigation
 
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.material3.AlertDialog
@@ -114,6 +117,24 @@ fun TreeNavHost() {
         composable(
             Routes.PERSON,
             arguments = listOf(navArgument("id") { type = NavType.StringType }),
+            enterTransition = {
+                fadeIn(tween(340, easing = FastOutSlowInEasing)) +
+                    scaleIn(
+                        initialScale = 0.94f,
+                        animationSpec = tween(340, easing = FastOutSlowInEasing),
+                        transformOrigin = androidx.compose.ui.graphics.TransformOrigin(0.5f, 0.35f),
+                    )
+            },
+            exitTransition = { fadeOut(tween(220)) },
+            popEnterTransition = { fadeIn(tween(260)) },
+            popExitTransition = {
+                fadeOut(tween(260, easing = FastOutSlowInEasing)) +
+                    scaleOut(
+                        targetScale = 0.96f,
+                        animationSpec = tween(260, easing = FastOutSlowInEasing),
+                        transformOrigin = androidx.compose.ui.graphics.TransformOrigin(0.5f, 0.35f),
+                    )
+            },
         ) { entry ->
             PersonDetailScreen(entry.arguments?.getString("id").orEmpty(), nav)
         }
