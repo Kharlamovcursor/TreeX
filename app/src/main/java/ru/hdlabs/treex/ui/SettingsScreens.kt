@@ -139,6 +139,8 @@ fun SettingsScreen(nav: NavHostController) {
     }
 
     HdScaffold(title = "Настройки", onBack = { nav.popBackStack() }) {
+        HdSecondaryButton("Справка по древу") { nav.navigate(Routes.TREE_HELP) }
+        Spacer(Modifier.height(12.dp))
         HdCard {
             Text("Формат древа", color = HdTextPrimary, fontWeight = FontWeight.SemiBold)
             Text(

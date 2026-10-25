@@ -6,7 +6,10 @@ import java.time.LocalDate
 import java.time.Period
 import java.time.format.DateTimeParseException
 
+fun PersonEntity.isVacantSlot(): Boolean = vacant
+
 fun PersonEntity.fullName(): String {
+    if (vacant) return "Пустое место"
     val surname = if (birthLastName.isNotBlank() && !birthLastName.equals(lastName, ignoreCase = true)) {
         "$lastName ($birthLastName)"
     } else {
@@ -103,6 +106,7 @@ private fun parseIsoDate(value: String): LocalDate? = try {
 fun yearOf(value: String): String? = Regex("""(\d{4})""").find(value)?.groupValues?.get(1)
 
 fun PersonEntity.matchesQuery(query: String): Boolean {
+    if (vacant) return false
     if (query.isBlank()) return true
     val haystack = listOf(lastName, birthLastName, firstName, middleName, phone, email, birthPlace, notes, birthDate, deathDate)
         .joinToString(" ")

@@ -33,6 +33,7 @@ data class PersonRecord(
     val notes: String = "",
     val fatherId: String? = null,
     val motherId: String? = null,
+    val vacant: Boolean = false,
     val createdAtMillis: Long = 0L,
     val updatedAtMillis: Long = 0L,
 )

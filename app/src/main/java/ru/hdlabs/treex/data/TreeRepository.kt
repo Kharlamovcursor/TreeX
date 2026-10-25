@@ -109,7 +109,12 @@ class TreeRepository(
                 val merged = if (previous != null && preserveUntouched) mergePerson(previous, person, touched) else person
                 val fatherId = merged.fatherId?.takeIf { it in knownIds && it != merged.id }
                 val motherId = merged.motherId?.takeIf { it in knownIds && it != merged.id && it != fatherId }
-                val clean = merged.copy(fatherId = fatherId, motherId = motherId)
+                val named = merged.firstName.isNotBlank() || merged.lastName.isNotBlank() || merged.middleName.isNotBlank()
+                val clean = merged.copy(
+                    fatherId = fatherId,
+                    motherId = motherId,
+                    vacant = merged.vacant && !named,
+                )
                 val parents = existing.associate { it.id to (it.fatherId to it.motherId) }.toMutableMap()
                 parents[clean.id] = clean.fatherId to clean.motherId
                 if (TreeRules.createsCycle(parents, clean.id, clean.fatherId, clean.motherId)) {
@@ -188,28 +193,61 @@ class TreeRepository(
                 snapshotLocked(readLocked())
                 val people = peopleDao.all()
                 val removed = people.find { it.id == id } ?: return@withTransaction
-                val fresh = linksAfterRemoval(removed, people, unionDao.all())
-                people.filter { it.fatherId == id || it.motherId == id }.forEach { child ->
-                    peopleDao.upsert(
-                        child.copy(
-                            fatherId = child.fatherId?.takeIf { it != id },
-                            motherId = child.motherId?.takeIf { it != id },
-                            updatedAtMillis = System.currentTimeMillis(),
-                        ),
-                    )
+                if (removed.vacant) {
+                    purgePersonLocked(removed, people)
+                } else {
+                    vacatePersonLocked(removed)
                 }
-                val photo = removed.photoFile
-                unionDao.deleteInvolving(id)
-                peopleDao.delete(id)
-                PhotoStore.delete(context, photo)
-                generation += 1
-                val kept = openLinksState.value.filter { link ->
-                    link.ownerId != id && link.anchorId != id && id !in link.childIds
-                }
-                writeOpenLinks(kept + fresh)
             }
         }
         schedulePush()
+    }
+
+    private suspend fun vacatePersonLocked(removed: PersonEntity) {
+        if (removed.photoFile.isNotBlank()) {
+            PhotoStore.delete(context, removed.photoFile)
+        }
+        val now = System.currentTimeMillis()
+        peopleDao.upsert(
+            removed.copy(
+                vacant = true,
+                lastName = "",
+                birthLastName = "",
+                firstName = "",
+                middleName = "",
+                birthDate = "",
+                deathDate = "",
+                birthPlace = "",
+                email = "",
+                phone = "",
+                photoFile = "",
+                notes = "",
+                updatedAtMillis = now,
+            ),
+        )
+        generation += 1
+    }
+
+    private suspend fun purgePersonLocked(removed: PersonEntity, people: List<PersonEntity>) {
+        val fresh = linksAfterRemoval(removed, people, unionDao.all())
+        people.filter { it.fatherId == removed.id || it.motherId == removed.id }.forEach { child ->
+            peopleDao.upsert(
+                child.copy(
+                    fatherId = child.fatherId?.takeIf { it != removed.id },
+                    motherId = child.motherId?.takeIf { it != removed.id },
+                    updatedAtMillis = System.currentTimeMillis(),
+                ),
+            )
+        }
+        val photo = removed.photoFile
+        unionDao.deleteInvolving(removed.id)
+        peopleDao.delete(removed.id)
+        if (photo.isNotBlank()) PhotoStore.delete(context, photo)
+        generation += 1
+        val kept = openLinksState.value.filter { link ->
+            link.ownerId != removed.id && link.anchorId != removed.id && removed.id !in link.childIds
+        }
+        writeOpenLinks(kept + fresh)
     }
 
     suspend fun attachOpenLink(linkId: String, targetId: String) {
@@ -550,6 +588,7 @@ private fun PersonEntity.toRecord() = PersonRecord(
     notes = notes,
     fatherId = fatherId,
     motherId = motherId,
+    vacant = vacant,
     createdAtMillis = createdAtMillis,
     updatedAtMillis = updatedAtMillis,
 )
@@ -570,6 +609,7 @@ private fun PersonRecord.toEntity() = PersonEntity(
     notes = notes,
     fatherId = fatherId,
     motherId = motherId,
+    vacant = vacant,
     createdAtMillis = createdAtMillis,
     updatedAtMillis = updatedAtMillis,
 )

@@ -47,6 +47,7 @@ import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.geometry.RoundRect
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -55,7 +56,6 @@ import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
@@ -73,6 +73,7 @@ import ru.hdlabs.treex.domain.OpenLink
 import ru.hdlabs.treex.domain.TreeLayout
 import ru.hdlabs.treex.domain.TreePlacement
 import ru.hdlabs.treex.domain.fullName
+import ru.hdlabs.treex.domain.isVacantSlot
 import ru.hdlabs.treex.domain.lifeLine
 import ru.hdlabs.treex.ui.theme.HdBlue
 import ru.hdlabs.treex.ui.theme.HdOrange
@@ -330,8 +331,9 @@ private fun TreeNode(
         label = "cardLift",
     )
     GenderFrame(
-        gender = person.gender,
+        gender = if (person.isVacantSlot()) "u" else person.gender,
         emphasized = selected || fresh,
+        vacant = person.isVacantSlot(),
         modifier = modifier
             .width(TreeLayout.CARD_W.dp)
             .height(height.dp)
@@ -352,7 +354,13 @@ private fun TreeNode(
                     )
                 },
             shape = RoundedCornerShape(14.dp),
-            colors = CardDefaults.cardColors(containerColor = HdPanelElevated.copy(alpha = 0.96f)),
+            colors = CardDefaults.cardColors(
+                containerColor = if (person.isVacantSlot()) {
+                    HdPanelElevated.copy(alpha = 0.72f)
+                } else {
+                    HdPanelElevated.copy(alpha = 0.96f)
+                },
+            ),
             border = BorderStroke(0.dp, Color.Transparent),
             elevation = CardDefaults.cardElevation(defaultElevation = if (selected) 10.dp else 2.dp),
         ) {
@@ -360,18 +368,35 @@ private fun TreeNode(
                 Modifier.padding(horizontal = 8.dp, vertical = 8.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
-                PersonAvatar(person, 36.dp)
-                Text(
-                    person.fullName(),
-                    color = HdTextPrimary,
-                    fontWeight = FontWeight.SemiBold,
-                    fontSize = 14.sp,
-                    lineHeight = 18.sp,
-                    textAlign = TextAlign.Center,
-                )
-                val years = person.lifeLine()
-                if (years.isNotBlank()) {
-                    Text(years, color = HdTextSecondary, fontSize = 12.sp, textAlign = TextAlign.Center)
+                if (person.isVacantSlot()) {
+                    Text("+", color = HdOrange, fontSize = 28.sp, fontWeight = FontWeight.Light)
+                    Text(
+                        "Пустое место",
+                        color = HdTextPrimary,
+                        fontWeight = FontWeight.SemiBold,
+                        fontSize = 14.sp,
+                        textAlign = TextAlign.Center,
+                    )
+                    Text(
+                        "Тап — действия",
+                        color = HdTextSecondary,
+                        fontSize = 11.sp,
+                        textAlign = TextAlign.Center,
+                    )
+                } else {
+                    PersonAvatar(person, 36.dp)
+                    Text(
+                        person.fullName(),
+                        color = HdTextPrimary,
+                        fontWeight = FontWeight.SemiBold,
+                        fontSize = 14.sp,
+                        lineHeight = 18.sp,
+                        textAlign = TextAlign.Center,
+                    )
+                    val years = person.lifeLine()
+                    if (years.isNotBlank()) {
+                        Text(years, color = HdTextSecondary, fontSize = 12.sp, textAlign = TextAlign.Center)
+                    }
                 }
             }
         }
@@ -382,41 +407,41 @@ private fun TreeNode(
 private fun GenderFrame(
     gender: String,
     emphasized: Boolean,
+    vacant: Boolean = false,
     modifier: Modifier = Modifier,
     content: @Composable () -> Unit,
 ) {
     val shimmer = rememberInfiniteTransition(label = "shimmer")
-    val turn by shimmer.animateFloat(
+    val phase by shimmer.animateFloat(
         initialValue = 0f,
-        targetValue = 360f,
+        targetValue = 120f,
         animationSpec = infiniteRepeatable(
-            animation = tween(if (gender == "f") 12000 else 14000, easing = LinearEasing),
+            animation = tween(if (gender == "f") 5200 else 6200, easing = LinearEasing),
         ),
-        label = "turn",
+        label = "phase",
     )
     val glow by shimmer.animateFloat(
-        initialValue = 0.32f,
-        targetValue = 0.58f,
+        initialValue = 0.28f,
+        targetValue = 0.5f,
         animationSpec = infiniteRepeatable(
-            animation = tween(4200, easing = FastOutSlowInEasing),
+            animation = tween(3800, easing = FastOutSlowInEasing),
             repeatMode = RepeatMode.Reverse,
         ),
         label = "glow",
     )
-    val colors = when (gender) {
-        "f" -> listOf(
+    val colors = when {
+        vacant -> listOf(HdOrange.copy(alpha = 0.4f), HdOrange, HdTextSecondary.copy(alpha = 0.5f))
+        gender == "f" -> listOf(
             Color(0xFFFFD6E3),
             Color(0xFFFF6B9D),
             Color(0xFFFF1744),
             Color(0xFFC2185B),
-            Color(0xFFFFD6E3),
         )
-        "m" -> listOf(
+        gender == "m" -> listOf(
             Color(0xFFB8D9FF),
             Color(0xFF1E88E5),
             Color(0xFF0D47A1),
             Color(0xFF1565C0),
-            Color(0xFFB8D9FF),
         )
         else -> listOf(HdBlue.copy(alpha = 0.5f), HdOrange, HdBlue.copy(alpha = 0.5f))
     }
@@ -426,23 +451,39 @@ private fun GenderFrame(
     val corner = with(androidx.compose.ui.platform.LocalDensity.current) { 16.dp.toPx() }
     Box(
         modifier = modifier.drawBehind {
-            val frameSize = Size(size.width, size.height)
-            val alpha = if (emphasized) glow.coerceIn(0.48f, 0.82f) else glow.coerceIn(0.22f, 0.42f)
-            rotate(turn, pivot = center) {
-                drawRoundRect(
-                    brush = Brush.sweepGradient(colors.map { it.copy(alpha = alpha) }),
-                    topLeft = Offset(stroke / 2f, stroke / 2f),
-                    size = Size(frameSize.width - stroke, frameSize.height - stroke),
-                    cornerRadius = CornerRadius(corner, corner),
-                    style = Stroke(width = stroke),
-                )
-            }
-            drawRoundRect(
-                color = colors[1].copy(alpha = alpha * 0.12f),
-                topLeft = Offset(stroke, stroke),
-                size = Size(frameSize.width - stroke * 2f, frameSize.height - stroke * 2f),
-                cornerRadius = CornerRadius(corner, corner),
-                style = Stroke(width = stroke * 2.2f),
+            val inset = stroke / 2f
+            val round = RoundRect(
+                inset,
+                inset,
+                size.width - inset,
+                size.height - inset,
+                CornerRadius(corner, corner),
+            )
+            val path = Path().apply { addRoundRect(round) }
+            val alpha = if (emphasized) glow.coerceIn(0.4f, 0.72f) else glow.coerceIn(0.2f, 0.38f)
+            drawPath(
+                path,
+                colors[1].copy(alpha = alpha * 0.55f),
+                style = Stroke(width = stroke, cap = StrokeCap.Round),
+            )
+            val dashMain = floatArrayOf(stroke * 2.8f, stroke * 6.5f)
+            drawPath(
+                path,
+                colors[2].copy(alpha = alpha * 0.95f),
+                style = Stroke(
+                    width = stroke,
+                    cap = StrokeCap.Round,
+                    pathEffect = PathEffect.dashPathEffect(dashMain, phase),
+                ),
+            )
+            drawPath(
+                path,
+                colors[0].copy(alpha = alpha * 0.7f),
+                style = Stroke(
+                    width = stroke * 0.75f,
+                    cap = StrokeCap.Round,
+                    pathEffect = PathEffect.dashPathEffect(floatArrayOf(stroke * 1.2f, stroke * 9f), phase * 1.35f),
+                ),
             )
         },
     ) {

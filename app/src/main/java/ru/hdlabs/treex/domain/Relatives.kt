@@ -45,6 +45,7 @@ fun mergePerson(previous: PersonEntity, incoming: PersonEntity, touched: Set<Str
         notes = field("notes", incoming.notes, previous.notes),
         fatherId = field("father", incoming.fatherId, previous.fatherId),
         motherId = field("mother", incoming.motherId, previous.motherId),
+        vacant = field("vacant", incoming.vacant, previous.vacant),
         createdAtMillis = previous.createdAtMillis.takeIf { it > 0 } ?: incoming.createdAtMillis,
     )
 }

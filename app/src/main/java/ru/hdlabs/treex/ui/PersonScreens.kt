@@ -63,6 +63,7 @@ import ru.hdlabs.treex.domain.RelativeAttach
 import ru.hdlabs.treex.domain.SpouseDraft
 import ru.hdlabs.treex.domain.formatSpouseDrafts
 import ru.hdlabs.treex.domain.fullName
+import ru.hdlabs.treex.domain.isVacantSlot
 import ru.hdlabs.treex.domain.lifeLine
 import ru.hdlabs.treex.domain.parseSpouseDrafts
 import ru.hdlabs.treex.domain.spouseDraftsOf
@@ -341,6 +342,7 @@ fun PersonEditorScreen(routeId: String, role: String, anchor: String, nav: NavHo
     val alpha by animateFloatAsState(if (appeared) 1f else 0f, tween(280), label = "formAlpha")
     val duplicate = tree.people.any {
         it.id != personId &&
+            !it.vacant &&
             it.lastName.equals(draft.lastName, true) &&
             it.firstName.equals(draft.firstName, true) &&
             it.middleName.equals(draft.middleName, true) &&
@@ -520,6 +522,35 @@ fun PersonDetailScreen(personId: String, nav: NavHostController) {
     }
     val spouses = spouseIdsOf(tree.unions, person.id).mapNotNull { id -> tree.people.find { it.id == id } }
     val children = tree.people.filter { it.fatherId == person.id || it.motherId == person.id }
+    if (person.isVacantSlot()) {
+        HdScaffold(title = "Пустое место", onBack = { nav.popBackStack() }) {
+            Text("Здесь была карточка. Древо и связи сохранены.", color = HdTextSecondary)
+            Spacer(Modifier.height(12.dp))
+            HdPrimaryButton("Создать карточку") { nav.navigate(Routes.edit(person.id)) }
+            Spacer(Modifier.height(8.dp))
+            HdSecondaryButton("Изменить связи") { nav.navigate(Routes.edit(person.id)) }
+            Spacer(Modifier.height(12.dp))
+            HdSecondaryButton("Убрать место") { confirmDelete = true }
+        }
+        if (confirmDelete) {
+            AlertDialog(
+                onDismissRequest = { confirmDelete = false },
+                title = { Text("Убрать пустое место?") },
+                text = { Text("Место исчезнет с древа.", color = HdTextSecondary) },
+                confirmButton = {
+                    HdPrimaryButton("Убрать") {
+                        confirmDelete = false
+                        app.container.scope.launch {
+                            app.container.treeRepository.deletePerson(person.id)
+                            withContext(Dispatchers.Main) { nav.popBackStack() }
+                        }
+                    }
+                },
+                dismissButton = { HdSecondaryButton("Отмена") { confirmDelete = false } },
+            )
+        }
+        return
+    }
     HdScaffold(title = person.fullName(), onBack = { nav.popBackStack() }) {
         HdCard {
             Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) { PersonAvatar(person, 112.dp) }
@@ -584,8 +615,17 @@ fun PersonDetailScreen(personId: String, nav: NavHostController) {
     if (confirmDelete) {
         AlertDialog(
             onDismissRequest = { confirmDelete = false },
-            title = { Text("Удалить карточку?") },
-            text = { Text("Человек исчезнет из древа, остальные связи останутся. Снимок до удаления сохранится в истории. Свободную линию можно удержанием перенести на другую карточку.", color = HdTextSecondary) },
+            title = { Text(if (person.isVacantSlot()) "Убрать пустое место?" else "Удалить карточку?") },
+            text = {
+                Text(
+                    if (person.isVacantSlot()) {
+                        "Место исчезнет с древа. Снимок сохранится в истории."
+                    } else {
+                        "Карточка станет пустым местом: древо и связи на месте. Снимок сохранится в истории."
+                    },
+                    color = HdTextSecondary,
+                )
+            },
             confirmButton = {
                 HdPrimaryButton("Удалить") {
                     confirmDelete = false

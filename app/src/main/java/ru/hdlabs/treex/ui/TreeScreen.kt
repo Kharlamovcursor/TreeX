@@ -20,6 +20,9 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.activity.compose.BackHandler
+import androidx.compose.material.icons.filled.HelpOutline
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.AlertDialog
@@ -58,6 +61,7 @@ import ru.hdlabs.treex.data.local.PersonEntity
 import ru.hdlabs.treex.data.settings.AppSettings
 import ru.hdlabs.treex.domain.TreeLayout
 import ru.hdlabs.treex.domain.fullName
+import ru.hdlabs.treex.domain.isVacantSlot
 import ru.hdlabs.treex.domain.lifeLine
 import ru.hdlabs.treex.domain.matchesQuery
 import ru.hdlabs.treex.domain.addSpouseLabel
@@ -97,26 +101,39 @@ fun TreeScreen(nav: NavHostController, highlight: String) {
     var pendingLinkId by remember { mutableStateOf<String?>(null) }
     var confirmDelete by remember { mutableStateOf(false) }
     var showOpenLinks by remember { mutableStateOf(false) }
+    var actionsExpanded by rememberSaveable { mutableStateOf(false) }
 
     LaunchedEffect(highlight) {
         activeHighlight = highlight
         if (highlight.isNotBlank()) {
             focusId = highlight
+            actionsExpanded = false
             kotlinx.coroutines.delay(2600)
             activeHighlight = ""
             nav.currentBackStackEntry?.savedStateHandle?.set("highlight", "")
         }
     }
-    LaunchedEffect(state.people, settings.homePersonId) {
+    LaunchedEffect(state.people) {
         val ids = state.people.map { it.id }.toSet()
-        if (focusId in ids) return@LaunchedEffect
-        focusId = settings.homePersonId.takeIf { it in ids }
-            ?: TreeLayout.bands(state.people, state.unions).firstOrNull()?.firstOrNull()?.id
-            ?: ""
+        if (focusId.isNotBlank() && focusId !in ids) {
+            focusId = ""
+            actionsExpanded = false
+        }
     }
 
+    val livingCount = state.people.count { !it.vacant }
     val visible = state.people.filter { person -> person.matchesQuery(query) }
     val focus = state.people.find { it.id == focusId }
+
+    BackHandler(enabled = focusId.isNotBlank() || actionsExpanded) {
+        when {
+            actionsExpanded -> actionsExpanded = false
+            focusId.isNotBlank() -> {
+                focusId = ""
+                actionsExpanded = false
+            }
+        }
+    }
 
     HdScaffold(
         title = "Древо",
@@ -146,32 +163,33 @@ fun TreeScreen(nav: NavHostController, highlight: String) {
             }) {
                 Icon(Icons.Filled.Refresh, contentDescription = "Обновить информацию", tint = HdTextPrimary)
             }
+            IconButton(onClick = { nav.navigate(Routes.TREE_HELP) }) {
+                Icon(Icons.Filled.HelpOutline, contentDescription = "Справка", tint = HdTextPrimary)
+            }
             IconButton(onClick = { nav.navigate(Routes.SETTINGS) }) {
                 Icon(Icons.Filled.Settings, contentDescription = "Настройки", tint = HdTextPrimary)
             }
         },
     ) {
         Column(Modifier.fillMaxSize()) {
-            Text(
-                if (state.people.isEmpty()) "Семейное древо" else "В древе ${state.people.size} чел.",
-                color = HdTextSecondary,
-            )
             if (state.people.isNotEmpty()) {
                 Text(
-                    "Тап — выбор и приближение, два тапа — карточка человека. Внизу экрана: изменить, удалить, добавить родственников. " +
-                        "Оранжевая линия — супруги, синяя — дети; после удаления человека свободную связь переносят оранжевой точкой на линии или кнопкой «Свободные связи».",
+                    if (livingCount == state.people.size) {
+                        "В древе $livingCount чел."
+                    } else {
+                        "В древе $livingCount чел., пустых мест ${state.people.size - livingCount}"
+                    },
                     color = HdTextSecondary,
-                    modifier = Modifier.padding(top = 4.dp),
                 )
             }
             if (syncNote != null) {
-                Text(syncNote.orEmpty(), color = HdOrange, modifier = Modifier.padding(top = 6.dp))
+                Text(syncNote.orEmpty(), color = HdOrange, modifier = Modifier.padding(top = 4.dp))
             }
             if (state.people.isNotEmpty()) {
-                Spacer(Modifier.height(8.dp))
-                HdTextField(query, { query = it }, "Поиск по имени, телефону, почте")
+                Spacer(Modifier.height(6.dp))
+                HdTextField(query, { query = it }, "Поиск")
             }
-            Spacer(Modifier.height(8.dp))
+            Spacer(Modifier.height(4.dp))
             when {
                 state.people.isEmpty() -> EmptyTree { nav.navigate(Routes.edit("new")) }
                 query.isNotBlank() && visible.isEmpty() -> Text("Никого не нашлось", color = HdTextSecondary)
@@ -184,17 +202,18 @@ fun TreeScreen(nav: NavHostController, highlight: String) {
                         ) {
                             query = ""
                             focusId = person.id
+                            actionsExpanded = false
                             centerToken += 1
                         }
                         Spacer(Modifier.height(8.dp))
                     }
                 }
-                focus != null -> {
+                else -> {
                     FamilyTree(
                         people = state.people,
                         unions = state.unions,
                         openLinks = openLinks,
-                        selectedId = focus.id,
+                        selectedId = focusId,
                         freshId = activeHighlight,
                         centerToken = centerToken,
                         pendingLinkId = pendingLinkId,
@@ -206,30 +225,41 @@ fun TreeScreen(nav: NavHostController, highlight: String) {
                                 scope.launch { app.container.treeRepository.attachOpenLink(linkId, person.id) }
                             } else {
                                 focusId = person.id
+                                actionsExpanded = false
                                 centerToken += 1
                             }
                         },
                         onOpenDetail = { nav.navigate(Routes.person(it.id)) },
                         onHoldLink = { pendingLinkId = it },
                     )
-                    FocusActionPanel(
-                        focus = focus,
-                        people = state.people,
-                        openLinks = openLinks,
-                        pendingLinkId = pendingLinkId,
-                        isHome = focus.id == settings.homePersonId,
-                        onOpenEditor = { nav.navigate(Routes.edit(focus.id)) },
-                        onOpenDetail = { nav.navigate(Routes.person(focus.id)) },
-                        onAdd = { role, anchor -> nav.navigate(Routes.edit("new", role, anchor)) },
-                        onDelete = { confirmDelete = true },
-                        onMakeHome = {
-                            scope.launch {
-                                app.container.settingsRepository.update { it.copy(homePersonId = focus.id) }
-                            }
-                        },
-                        onShowOpenLinks = { showOpenLinks = true },
-                        onCancelLinkPick = { pendingLinkId = null },
-                    )
+                    if (focus != null) {
+                        if (actionsExpanded) {
+                            FocusActionPanel(
+                                focus = focus,
+                                people = state.people,
+                                openLinks = openLinks,
+                                pendingLinkId = pendingLinkId,
+                                isHome = focus.id == settings.homePersonId,
+                                onOpenEditor = { nav.navigate(Routes.edit(focus.id)) },
+                                onOpenDetail = { nav.navigate(Routes.person(focus.id)) },
+                                onAdd = { role, anchor -> nav.navigate(Routes.edit("new", role, anchor)) },
+                                onDelete = { confirmDelete = true },
+                                onMakeHome = {
+                                    scope.launch {
+                                        app.container.settingsRepository.update { it.copy(homePersonId = focus.id) }
+                                    }
+                                },
+                                onShowOpenLinks = { showOpenLinks = true },
+                                onCancelLinkPick = { pendingLinkId = null },
+                                onCollapse = { actionsExpanded = false },
+                            )
+                        } else {
+                            CompactFocusBar(
+                                focus = focus,
+                                onExpand = { actionsExpanded = true },
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -319,26 +349,33 @@ fun TreeScreen(nav: NavHostController, highlight: String) {
         )
     }
     if (confirmDelete && focus != null) {
+        val vacant = focus.isVacantSlot()
         val name = focus.fullName()
         AlertDialog(
             onDismissRequest = { confirmDelete = false },
-            title = { Text("Удалить карточку?") },
+            title = { Text(if (vacant) "Убрать пустое место?" else "Удалить карточку?") },
             text = {
                 Text(
-                    "$name исчезнет. Остальные люди и их связи останутся. Если человек стоял между родственниками, свободную линию можно удержанием перенести на другую карточку.",
+                    if (vacant) {
+                        "Место исчезнет с древа, связи перестроятся. При необходимости появятся свободные линии для переноса."
+                    } else {
+                        "$name станет пустым местом на древе: связи и расположение сохранятся. Там можно создать новую карточку или изменить связи."
+                    },
                     color = HdTextSecondary,
                 )
             },
             confirmButton = {
-                HdPrimaryButton("Удалить") {
+                HdPrimaryButton(if (vacant) "Убрать" else "Удалить") {
                     val id = focus.id
                     confirmDelete = false
                     pendingLinkId = null
+                    actionsExpanded = false
                     scope.launch {
                         if (settings.homePersonId == id) {
                             app.container.settingsRepository.update { it.copy(homePersonId = "") }
                         }
                         app.container.treeRepository.deletePerson(id)
+                        if (vacant) focusId = ""
                     }
                 }
             },
@@ -358,6 +395,32 @@ private fun appliedGitMessage(result: RemoteRefresh): String = when (result) {
 }
 
 @Composable
+private fun CompactFocusBar(focus: PersonEntity, onExpand: () -> Unit) {
+    HdCard(
+        Modifier
+            .fillMaxWidth()
+            .padding(top = 4.dp)
+            .clickable { onExpand() },
+    ) {
+        Row(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                focus.fullName(),
+                color = HdTextPrimary,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
+            )
+            Icon(Icons.Filled.KeyboardArrowUp, contentDescription = "Действия", tint = HdOrange)
+        }
+    }
+}
+
+@Composable
 private fun FocusActionPanel(
     focus: PersonEntity,
     people: List<PersonEntity>,
@@ -371,31 +434,50 @@ private fun FocusActionPanel(
     onMakeHome: () -> Unit,
     onShowOpenLinks: () -> Unit,
     onCancelLinkPick: () -> Unit,
+    onCollapse: () -> Unit,
 ) {
     val known = people.map { it.id }.toSet()
-    HdCard(Modifier.fillMaxWidth().padding(top = 6.dp)) {
-        Text(focus.fullName(), color = HdTextPrimary, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
-        Spacer(Modifier.height(8.dp))
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Box(Modifier.weight(1f)) { HdPrimaryButton("Изменить") { onOpenEditor() } }
-            Box(Modifier.weight(1f)) { HdSecondaryButton("Карточка") { onOpenDetail() } }
+    val vacant = focus.isVacantSlot()
+    HdCard(Modifier.fillMaxWidth().padding(top = 4.dp)) {
+        Row(
+            Modifier.fillMaxWidth().clickable { onCollapse() },
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                focus.fullName(),
+                color = HdTextPrimary,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
+            )
+            Text("Свернуть", color = HdOrange, fontWeight = FontWeight.Medium)
         }
         Spacer(Modifier.height(8.dp))
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Box(Modifier.weight(1f)) {
-                HdSecondaryButton("Удалить") { onDelete() }
+        if (vacant) {
+            HdPrimaryButton("Создать карточку") { onOpenEditor() }
+            Spacer(Modifier.height(8.dp))
+            HdSecondaryButton("Изменить связи") { onOpenEditor() }
+            Spacer(Modifier.height(8.dp))
+            HdSecondaryButton(if (vacant) "Убрать место" else "Удалить") { onDelete() }
+        } else {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Box(Modifier.weight(1f)) { HdPrimaryButton("Изменить") { onOpenEditor() } }
+                Box(Modifier.weight(1f)) { HdSecondaryButton("Карточка") { onOpenDetail() } }
             }
-            if (!isHome) {
+            Spacer(Modifier.height(8.dp))
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Box(Modifier.weight(1f)) {
-                    HdSecondaryButton("Главный") { onMakeHome() }
+                    HdSecondaryButton("Удалить") { onDelete() }
+                }
+                if (!isHome) {
+                    Box(Modifier.weight(1f)) {
+                        HdSecondaryButton("Главный") { onMakeHome() }
+                    }
                 }
             }
         }
-        Text(
-            "В «Изменить» — отец, мать, супруг: выбрать или убрать связь.",
-            color = HdTextSecondary,
-            modifier = Modifier.padding(top = 8.dp),
-        )
         if (pendingLinkId != null) {
             Spacer(Modifier.height(8.dp))
             Text("Тапните карточку на древе, к которой прикрепить связь.", color = HdOrange)
@@ -404,15 +486,17 @@ private fun FocusActionPanel(
             Spacer(Modifier.height(8.dp))
             HdSecondaryButton("Свободные связи (${openLinks.size})") { onShowOpenLinks() }
         }
-        Spacer(Modifier.height(8.dp))
-        Text("Добавить родственника", color = HdTextPrimary, fontWeight = FontWeight.SemiBold)
-        Spacer(Modifier.height(6.dp))
-        Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            if (focus.fatherId !in known) TreeAction("Отец") { onAdd("father", focus.id) }
-            if (focus.motherId !in known) TreeAction("Мать") { onAdd("mother", focus.id) }
-            TreeAction(addSpouseLabel(focus.gender)) { onAdd("spouse", focus.id) }
-            TreeAction("Ребёнок") { onAdd("child", focus.id) }
-            TreeAction("Без родства") { onAdd("", "") }
+        if (!vacant) {
+            Spacer(Modifier.height(8.dp))
+            Text("Добавить родственника", color = HdTextPrimary, fontWeight = FontWeight.SemiBold)
+            Spacer(Modifier.height(6.dp))
+            Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (focus.fatherId !in known) TreeAction("Отец") { onAdd("father", focus.id) }
+                if (focus.motherId !in known) TreeAction("Мать") { onAdd("mother", focus.id) }
+                TreeAction(addSpouseLabel(focus.gender)) { onAdd("spouse", focus.id) }
+                TreeAction("Ребёнок") { onAdd("child", focus.id) }
+                TreeAction("Без родства") { onAdd("", "") }
+            }
         }
     }
 }
