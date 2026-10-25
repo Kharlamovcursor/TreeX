@@ -34,7 +34,15 @@ object NetworkHelper {
         if (looksLikeNetworkIssue(error)) {
             return "Нет интернета. Синхронизация с Git отложена."
         }
-        return error.message?.takeIf { it.isNotBlank() }
+        val raw = error.message.orEmpty()
+        if (raw.contains("unexpected end", ignoreCase = true) ||
+            raw.contains("EOF", ignoreCase = true) ||
+            raw.contains("end of input", ignoreCase = true)
+        ) {
+            return "Связь оборвалась или ответ сервера неполный. Повторите по Wi‑Fi " +
+                "или скачайте APK с github.com/Kharlamovcursor/TreeX/releases"
+        }
+        return raw.takeIf { it.isNotBlank() }
     }
 
     fun toUserMessage(message: String?): String? {

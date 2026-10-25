@@ -1,9 +1,12 @@
 package ru.hdlabs.treex.update
 
 import kotlinx.serialization.SerialName
+import kotlinx.serialization.SerializationException
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import ru.hdlabs.treex.BuildConfig
 import java.io.File
+import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URL
 
@@ -36,29 +39,38 @@ class GitHubUpdateSource(
 
     fun checkForUpdate(currentVersionCode: Int): UpdateInfo? {
         if (owner.isBlank() || repo.isBlank()) return null
-        val url = URL("https://api.github.com/repos/$owner/$repo/releases/latest")
-        require(url.protocol.equals("https", true) && url.host.equals("api.github.com", true))
-        val connection = (url.openConnection() as HttpURLConnection).apply {
-            requestMethod = "GET"
-            instanceFollowRedirects = false
-            connectTimeout = 15_000
-            readTimeout = 30_000
-            setRequestProperty("Accept", "application/vnd.github+json")
-            setRequestProperty("User-Agent", "HDLabs-TreeX-Android")
+        var lastError: Exception? = null
+        repeat(3) { attempt ->
+            if (attempt > 0) Thread.sleep(1_500L * attempt)
+            runCatching {
+                fetchReleaseJson("https://api.github.com/repos/$owner/$repo/releases/latest")
+            }.onSuccess { text ->
+                return parseRelease(text, currentVersionCode)
+            }.onFailure { error ->
+                lastError = error as? Exception ?: Exception(error.message, error)
+            }
         }
-        val code = connection.responseCode
-        val text = (if (code in 200..299) connection.inputStream else connection.errorStream)
-            ?.bufferedReader()?.use { it.readText() }.orEmpty()
-        if (code !in 200..299) {
+        throw lastError ?: IllegalStateException("Не удалось проверить обновления")
+    }
+
+    private fun parseRelease(text: String, currentVersionCode: Int): UpdateInfo? {
+        if (text.isBlank()) {
+            throw IllegalStateException("GitHub вернул пустой ответ. Попробуйте позже или скачайте APK вручную.")
+        }
+        val release = try {
+            json.decodeFromString<GitHubRelease>(text)
+        } catch (error: SerializationException) {
             throw IllegalStateException(
-                when (code) {
-                    404 -> "Релиз не найден. Новая версия появится в GitHub Releases."
-                    403 -> "GitHub временно ограничил проверку обновлений"
-                    else -> "GitHub ответил HTTP $code"
-                },
+                "Не удалось прочитать данные релиза (обрыв связи). " +
+                    "Повторите по Wi‑Fi или откройте github.com/$owner/$repo/releases в браузере.",
+                error,
+            )
+        } catch (error: IllegalArgumentException) {
+            throw IllegalStateException(
+                "Ответ GitHub не распознан. Скачайте APK вручную с github.com/$owner/$repo/releases",
+                error,
             )
         }
-        val release = json.decodeFromString<GitHubRelease>(text)
         val apk = release.assets.firstOrNull { it.name.equals("app-release.apk", ignoreCase = true) }
             ?: release.assets.firstOrNull { it.name.endsWith(".apk", ignoreCase = true) }
             ?: throw IllegalStateException("В последнем релизе нет файла APK")
@@ -71,6 +83,36 @@ class GitHubUpdateSource(
             apkFileName = apk.name,
         )
     }
+
+    private fun fetchReleaseJson(apiUrl: String): String {
+        val url = URL(apiUrl)
+        require(url.protocol.equals("https", true) && url.host.equals("api.github.com", true))
+        val connection = (url.openConnection() as HttpURLConnection).apply {
+            requestMethod = "GET"
+            instanceFollowRedirects = true
+            connectTimeout = 20_000
+            readTimeout = 45_000
+            setRequestProperty("Accept", "application/vnd.github+json")
+            setRequestProperty("User-Agent", "HDLabs-TreeX-Android")
+            val token = BuildConfig.GITHUB_FAMILY_TOKEN.trim()
+            if (token.isNotBlank()) {
+                setRequestProperty("Authorization", "Bearer $token")
+            }
+        }
+        val code = connection.responseCode
+        val text = (if (code in 200..299) connection.inputStream else connection.errorStream)
+            ?.bufferedReader()?.use { it.readText() }.orEmpty()
+        if (code !in 200..299) {
+            throw IllegalStateException(
+                when (code) {
+                    404 -> "Релиз не найден. Новая версия появится в GitHub Releases."
+                    403 -> "GitHub временно ограничил проверку обновлений. Попробуйте позже или скачайте APK вручную."
+                    else -> "GitHub ответил HTTP $code"
+                },
+            )
+        }
+        return text
+    }
 }
 
 object ApkDownloadHelper {
@@ -81,13 +123,41 @@ object ApkDownloadHelper {
         require(host == "github.com" || host.endsWith(".githubusercontent.com")) {
             "Недоверенный источник обновления"
         }
-        val connection = (parsed.openConnection() as HttpURLConnection).apply {
-            connectTimeout = 20_000
-            readTimeout = 120_000
-            instanceFollowRedirects = true
+        var lastError: Exception? = null
+        repeat(3) { attempt ->
+            if (attempt > 0) Thread.sleep(1_500L * attempt)
+            runCatching {
+                downloadOnce(parsed, target)
+                return
+            }.onFailure { error ->
+                lastError = error as? Exception ?: Exception(error.message, error)
+                if (target.exists()) target.delete()
+            }
         }
+        throw lastError ?: IOException("Не удалось скачать обновление")
+    }
+
+    private fun downloadOnce(parsed: URL, target: File) {
+        val connection = (parsed.openConnection() as HttpURLConnection).apply {
+            connectTimeout = 25_000
+            readTimeout = 180_000
+            instanceFollowRedirects = true
+            setRequestProperty("User-Agent", "HDLabs-TreeX-Android")
+            val token = BuildConfig.GITHUB_FAMILY_TOKEN.trim()
+            if (token.isNotBlank()) {
+                setRequestProperty("Authorization", "Bearer $token")
+            }
+        }
+        val code = connection.responseCode
+        if (code !in 200..299) {
+            throw IOException("Сервер вернул HTTP $code при загрузке APK")
+        }
+        val expected = connection.contentLengthLong
         connection.inputStream.use { input ->
             target.outputStream().use { output -> input.copyTo(output) }
+        }
+        if (expected > 0L && target.length() != expected) {
+            throw IOException("Загрузка прервалась (${target.length()} из $expected байт). Попробуйте по Wi‑Fi.")
         }
         require(target.exists() && target.length() > 10_000) { "Загруженный файл повреждён или пуст" }
         target.inputStream().use { input ->
