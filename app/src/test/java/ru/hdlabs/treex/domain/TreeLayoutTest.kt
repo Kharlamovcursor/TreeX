@@ -61,6 +61,29 @@ class TreeLayoutTest {
     }
 
     @Test
+    fun parentsSitAboveChildWhenChildWasAddedFirst() {
+        val people = listOf(
+            PersonEntity(id = "c", gender = "m", birthDate = "2000-01-01", lastName = "Сын"),
+            PersonEntity(id = "f", gender = "m", birthDate = "1970-01-01", lastName = "Отец"),
+            PersonEntity(id = "m", gender = "f", birthDate = "1972-01-01", lastName = "Мать"),
+        )
+        val unions = listOf(UnionEntity("u", "f", "m"))
+        val placed = TreeLayout.place(
+            people.map {
+                when (it.id) {
+                    "c" -> it.copy(fatherId = "f", motherId = "m")
+                    else -> it
+                }
+            },
+            unions,
+        )
+        val card = placed.cards.associateBy { it.id }
+        assertEquals(card.getValue("f").top, card.getValue("m").top, 0.5f)
+        assertTrue(card.getValue("c").top > card.getValue("f").top)
+        assertTrue(card.getValue("f").top < card.getValue("c").top)
+    }
+
+    @Test
     fun bridgeKeepsDescendantBelowTheSurvivingPerson() {
         val placed = TreeLayout.place(
             listOf(

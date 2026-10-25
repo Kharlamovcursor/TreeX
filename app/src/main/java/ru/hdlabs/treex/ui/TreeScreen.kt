@@ -223,6 +223,9 @@ fun TreeScreen(nav: NavHostController, highlight: String) {
                             if (linkId != null) {
                                 pendingLinkId = null
                                 scope.launch { app.container.treeRepository.attachOpenLink(linkId, person.id) }
+                                if (person.isVacantSlot()) {
+                                    nav.navigate(Routes.edit(person.id))
+                                }
                             } else {
                                 focusId = person.id
                                 actionsExpanded = false

@@ -21,6 +21,10 @@ fun describeOpenLink(link: OpenLink, people: List<PersonEntity>): String {
                 "После удаления: дети ($kids) и супруг $anchor — прикрепите линию к нужной карточке"
             }
         }
+        "vacancy" -> {
+            val anchor = name(link.anchorId)
+            "Пустое место — выберите человека для связи с $anchor или тапните само место, чтобы создать карточку"
+        }
         else -> "Свободная связь — выберите карточку на древе"
     }
 }
@@ -128,5 +132,48 @@ fun reattachPeople(link: OpenLink, target: PersonEntity, people: List<PersonEnti
 fun reattachSpouse(link: OpenLink, targetId: String): Pair<String, String>? {
     if (link.slot == "spouse" && targetId != link.ownerId) return link.ownerId to targetId
     if (link.slot == "bridge" && !link.anchorIsParent && targetId != link.anchorId) return link.anchorId to targetId
+    if (link.slot == "vacancy" && targetId != link.ownerId && targetId != link.anchorId) {
+        return link.anchorId to targetId
+    }
     return null
+}
+
+fun transferVacantSlot(
+    vacantId: String,
+    targetId: String,
+    people: List<PersonEntity>,
+    unions: List<UnionEntity>,
+): Pair<List<PersonEntity>, List<UnionEntity>> {
+    if (vacantId == targetId) return emptyList<PersonEntity>() to unions
+    val byId = people.associateBy { it.id }.toMutableMap()
+    val vacant = byId[vacantId] ?: return emptyList<PersonEntity>() to unions
+    val target = byId[targetId] ?: return emptyList<PersonEntity>() to unions
+    if (!vacant.vacant) return emptyList<PersonEntity>() to unions
+    val now = System.currentTimeMillis()
+    val updates = mutableListOf<PersonEntity>()
+    people.filter { it.fatherId == vacantId || it.motherId == vacantId }.forEach { child ->
+        val next = child.copy(
+            fatherId = if (child.fatherId == vacantId) targetId else child.fatherId,
+            motherId = if (child.motherId == vacantId) targetId else child.motherId,
+            updatedAtMillis = now,
+        )
+        byId[child.id] = next
+        updates += next
+    }
+    val nextUnions = unions.mapNotNull { union ->
+        val partners = setOf(union.partnerAId, union.partnerBId)
+        when {
+            vacantId !in partners -> union
+            targetId in partners -> null
+            else -> {
+                val other = if (union.partnerAId == vacantId) union.partnerBId else union.partnerAId
+                union.copy(
+                    id = stableUnionId(minOf(targetId, other), maxOf(targetId, other)),
+                    partnerAId = minOf(targetId, other),
+                    partnerBId = maxOf(targetId, other),
+                )
+            }
+        }
+    }.distinctBy { it.id }
+    return updates to nextUnions
 }

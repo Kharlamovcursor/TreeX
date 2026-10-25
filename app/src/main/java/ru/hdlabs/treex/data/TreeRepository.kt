@@ -33,6 +33,7 @@ import ru.hdlabs.treex.domain.RelativeAttach
 import ru.hdlabs.treex.domain.linksAfterRemoval
 import ru.hdlabs.treex.domain.reattachPeople
 import ru.hdlabs.treex.domain.reattachSpouse
+import ru.hdlabs.treex.domain.transferVacantSlot
 import ru.hdlabs.treex.domain.stableUnionId
 import ru.hdlabs.treex.domain.SpouseDraft
 import ru.hdlabs.treex.domain.TreeRules
@@ -225,6 +226,23 @@ class TreeRepository(
                 updatedAtMillis = now,
             ),
         )
+        val vacancyLinks = unionDao.all().mapNotNull { union ->
+            val partners = setOf(union.partnerAId, union.partnerBId)
+            if (removed.id !in partners) return@mapNotNull null
+            val other = partners.first { it != removed.id }
+            OpenLink(
+                id = java.util.UUID.randomUUID().toString(),
+                slot = "vacancy",
+                ownerId = removed.id,
+                anchorId = other,
+            )
+        }
+        if (vacancyLinks.isNotEmpty()) {
+            val kept = openLinksState.value.filter { link ->
+                link.ownerId != removed.id && link.anchorId != removed.id
+            }
+            writeOpenLinks(kept + vacancyLinks)
+        }
         generation += 1
     }
 
@@ -256,12 +274,50 @@ class TreeRepository(
                 val link = openLinksState.value.find { it.id == linkId } ?: return@withTransaction
                 val people = peopleDao.all()
                 val target = people.find { it.id == targetId } ?: return@withTransaction
-                val updates = reattachPeople(link, target, people)
-                val spouse = reattachSpouse(link, targetId)
-                if (updates.isEmpty() && spouse == null) return@withTransaction
+                val vacant = target.vacant
+                val vacantFill = if (link.slot == "vacancy" && vacant && targetId == link.ownerId) {
+                    true
+                } else {
+                    false
+                }
+                val transfer = if (link.slot == "vacancy" && vacant && targetId != link.ownerId) {
+                    transferVacantSlot(link.ownerId, targetId, people, unionDao.all())
+                } else {
+                    null
+                }
+                val updates = when {
+                    transfer != null -> transfer.first
+                    vacantFill -> emptyList()
+                    else -> reattachPeople(link, target, people)
+                }
+                val spouse = if (transfer != null) {
+                    reattachSpouse(link, targetId)
+                } else if (!vacantFill) {
+                    reattachSpouse(link, targetId)
+                } else {
+                    null
+                }
+                val alreadyLinked = when (link.slot) {
+                    "father" -> people.find { it.id == link.ownerId }?.fatherId == targetId
+                    "mother" -> people.find { it.id == link.ownerId }?.motherId == targetId
+                    "spouse" -> unionDao.all().any {
+                        setOf(it.partnerAId, it.partnerBId) == setOf(link.ownerId, targetId)
+                    }
+                    "vacancy" -> vacantFill || transfer != null
+                    else -> false
+                }
+                if (updates.isEmpty() && spouse == null && transfer == null && !alreadyLinked && !vacantFill) {
+                    return@withTransaction
+                }
                 snapshotLocked(readLocked())
                 updates.forEach { peopleDao.upsert(it) }
-                if (spouse != null) {
+                if (transfer != null) {
+                    val vacantId = link.ownerId
+                    val keptUnions = unionDao.all().filter { vacantId !in setOf(it.partnerAId, it.partnerBId) }
+                    unionDao.deleteAll()
+                    unionDao.upsertAll(keptUnions + transfer.second)
+                    peopleDao.delete(vacantId)
+                } else if (spouse != null) {
                     val (first, second) = spouse
                     val known = unionDao.all().any { setOf(it.partnerAId, it.partnerBId) == setOf(first, second) }
                     if (!known && first != second) {
