@@ -312,6 +312,8 @@ fun HdScaffold(
     scroll: Boolean = true,
     progressMessage: String? = null,
     minimalTopBar: Boolean = false,
+    hideTopBar: Boolean = false,
+    contentPadding: PaddingValues = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
     content: @Composable ColumnScope.() -> Unit,
 ) {
     androidx.compose.foundation.layout.Box(Modifier.fillMaxSize()) {
@@ -320,31 +322,33 @@ fun HdScaffold(
             containerColor = HdBlack.copy(alpha = 0.42f),
             floatingActionButton = floating,
             topBar = {
-                TopAppBar(
-                    title = {
-                        if (minimalTopBar) {
-                            Text("")
-                        } else if (titleContent != null) {
-                            titleContent()
-                        } else {
-                            Text(title, color = HdTextPrimary)
-                        }
-                    },
-                    navigationIcon = {
-                        if (onBack != null) {
-                            IconButton(onClick = onBack) {
-                                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Назад", tint = HdTextPrimary)
+                if (!hideTopBar) {
+                    TopAppBar(
+                        title = {
+                            if (minimalTopBar) {
+                                Text("")
+                            } else if (titleContent != null) {
+                                titleContent()
+                            } else {
+                                Text(title, color = HdTextPrimary)
                             }
-                        }
-                    },
-                    actions = actions,
-                    colors = TopAppBarDefaults.topAppBarColors(containerColor = HdBlack.copy(alpha = 0.7f)),
-                )
+                        },
+                        navigationIcon = {
+                            if (onBack != null) {
+                                IconButton(onClick = onBack) {
+                                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Назад", tint = HdTextPrimary)
+                                }
+                            }
+                        },
+                        actions = actions,
+                        colors = TopAppBarDefaults.topAppBarColors(containerColor = HdBlack.copy(alpha = 0.7f)),
+                    )
+                }
             },
         ) { padding ->
             val modifier = Modifier
-                .padding(padding)
-                .padding(horizontal = 16.dp, vertical = 8.dp)
+                .padding(if (hideTopBar) PaddingValues(0.dp) else padding)
+                .padding(contentPadding)
                 .imePadding()
             Column(if (scroll) modifier.verticalScroll(rememberScrollState()) else modifier.fillMaxSize()) {
                 HdActionProgress(progressMessage)

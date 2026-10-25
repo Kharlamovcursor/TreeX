@@ -132,6 +132,7 @@ object TreeLayout {
         people: List<PersonEntity>,
         unions: List<UnionEntity>,
         openLinks: List<OpenLink> = emptyList(),
+        homePersonId: String? = null,
     ): TreePlacement {
         if (people.isEmpty()) return TreePlacement(emptyList(), emptyList(), emptyList(), 0f, 0f)
         val byId = people.associateBy { it.id }
@@ -201,7 +202,14 @@ object TreeLayout {
                     else -> {
                         val fatherIn = child.fatherId in memberSet
                         val motherIn = child.motherId in memberSet
-                        fatherIn && !motherIn || motherIn && !fatherIn
+                        when {
+                            fatherIn && motherIn -> true
+                            fatherIn || motherIn -> {
+                                val missing = if (fatherIn) child.motherId else child.fatherId
+                                missing == null || missing !in byId
+                            }
+                            else -> false
+                        }
                     }
                 }
             }
@@ -215,23 +223,42 @@ object TreeLayout {
             return House(safe, members, children, parentChain, memberParentChains)
         }
 
+        val graphComponents = treeComponents(people, unions)
+        val home = homePersonId?.trim()?.takeIf { it.isNotBlank() && it in byId }
+        val orderedComponents = graphComponents.sortedWith(
+            compareByDescending<Set<String>> { it.size }.thenByDescending { home != null && home in it },
+        )
         val roots = mutableListOf<House>()
         val seen = mutableSetOf<String>()
-        val rootBlood = people.map { it.id }
-            .filter { it !in held && !hasParents(it) && !isMarriedIn(it) && !isInLawOnlyAnchor(it) }
-            .sortedWith(compareBy({ byId.getValue(it).birthDate }, { byId.getValue(it).lastName }, { it }))
-        for (id in rootBlood) {
-            if (id in seen) continue
-            val component = mutableListOf<String>()
-            val queue = ArrayDeque<String>()
-            queue.add(id)
-            while (queue.isNotEmpty()) {
-                val current = queue.removeFirst()
-                if (!seen.add(current) || hasParents(current) || isMarriedIn(current)) continue
-                component.add(current)
-                spouses.getValue(current).forEach { queue.add(it) }
+        for (component in orderedComponents) {
+            val inComponent = component - held
+            if (inComponent.isEmpty()) continue
+            val rootBlood = inComponent
+                .filter { !hasParents(it) && !isMarriedIn(it) && !isInLawOnlyAnchor(it) }
+                .sortedWith(compareBy({ byId.getValue(it).birthDate }, { byId.getValue(it).lastName }, { it }))
+            if (rootBlood.isEmpty()) {
+                val anchor = home?.takeIf { it in inComponent }
+                    ?: inComponent.minByOrNull { byId.getValue(it).birthDate }
+                if (anchor != null && anchor !in seen) {
+                    seen.add(anchor)
+                    roots.add(buildHouse(listOf(anchor), emptySet()))
+                }
+                continue
             }
-            if (component.isNotEmpty()) roots.add(buildHouse(component, emptySet()))
+            for (id in rootBlood) {
+                if (id in seen) continue
+                val blood = mutableListOf<String>()
+                val queue = ArrayDeque<String>()
+                queue.add(id)
+                while (queue.isNotEmpty()) {
+                    val current = queue.removeFirst()
+                    if (current !in inComponent) continue
+                    if (!seen.add(current) || hasParents(current) || isMarriedIn(current)) continue
+                    blood.add(current)
+                    spouses.getValue(current).filter { it in inComponent }.forEach { queue.add(it) }
+                }
+                if (blood.isNotEmpty()) roots.add(buildHouse(blood, emptySet()))
+            }
         }
         val placedIds = mutableSetOf<String>()
         fun collect(house: House) {
@@ -246,11 +273,12 @@ object TreeLayout {
         }
 
         val cards = mutableListOf<TreeCard>()
+        val cardIds = mutableSetOf<String>()
         val childGroups = mutableListOf<ChildGroup>()
         var cursor = PAD
         roots.forEach { house ->
             measure(house)
-            position(house, cursor, PAD, cards, childGroups, byId, heights, openLinks)
+            position(house, cursor, PAD, cards, cardIds, childGroups, byId, heights, openLinks)
             cursor += house.width + HOUSE_GAP
         }
         val spouseLinks = unions.mapNotNull { union ->
@@ -339,6 +367,7 @@ object TreeLayout {
         left: Float,
         top: Float,
         cards: MutableList<TreeCard>,
+        cardIds: MutableSet<String>,
         childGroups: MutableList<ChildGroup>,
         byId: Map<String, PersonEntity>,
         heights: Map<String, Float>,
@@ -352,7 +381,7 @@ object TreeLayout {
         val membersLeft = left + (house.width - selfWidth) / 2f
         house.parentChain?.let { parents ->
             val parentLeft = left + (house.width - parents.width) / 2f
-            position(parents, parentLeft, top, cards, childGroups, byId, heights, openLinks, siblingRowHeight = null)
+            position(parents, parentLeft, top, cards, cardIds, childGroups, byId, heights, openLinks, siblingRowHeight = null)
             membersTop = top + subtreeHeight(parents, heights) + ROW_GAP
         }
         if (house.memberParentChains.isNotEmpty()) {
@@ -360,21 +389,23 @@ object TreeLayout {
             house.members.forEachIndexed { index, id ->
                 val chain = house.memberParentChains[id] ?: return@forEachIndexed
                 val colLeft = membersLeft + index * (CARD_W + SPOUSE_GAP) + (CARD_W - chain.width) / 2f
-                position(chain, colLeft, top, cards, childGroups, byId, heights, openLinks, siblingRowHeight = null)
+                position(chain, colLeft, top, cards, cardIds, childGroups, byId, heights, openLinks, siblingRowHeight = null)
                 maxAbove = max(maxAbove, subtreeHeight(chain, heights))
             }
             membersTop = top + maxAbove + ROW_GAP
         }
         val memberRowH = siblingRowHeight ?: uniformRowHeight(house.members, heights)
         house.members.forEachIndexed { index, id ->
-            cards.add(
-                TreeCard(
-                    id,
-                    membersLeft + index * (CARD_W + SPOUSE_GAP),
-                    membersTop,
-                    memberRowH,
-                ),
-            )
+            if (cardIds.add(id)) {
+                cards.add(
+                    TreeCard(
+                        id,
+                        membersLeft + index * (CARD_W + SPOUSE_GAP),
+                        membersTop,
+                        memberRowH,
+                    ),
+                )
+            }
         }
         if (house.children.isNotEmpty()) {
             val childrenWidth = house.children.sumOf { it.width.toDouble() }.toFloat() +
@@ -388,6 +419,7 @@ object TreeLayout {
                     childLeft,
                     childTop,
                     cards,
+                    cardIds,
                     childGroups,
                     byId,
                     heights,

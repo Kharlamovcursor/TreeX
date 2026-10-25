@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -168,67 +169,62 @@ fun TreeScreen(nav: NavHostController, highlight: String) {
         }
     }
 
+    val onGitRefresh: () -> Unit = onGitRefresh@{
+        if (refreshing) return@onGitRefresh
+        scope.launch {
+            refreshing = true
+            try {
+                when (val result = app.container.treeRepository.inspectGit()) {
+                    is RemoteRefresh.Incoming -> updatedMessage = appliedGitMessage(
+                        app.container.treeRepository.refreshFromGit(),
+                    )
+                    is RemoteRefresh.LocalAhead -> {
+                        updatedMessage = if (livingCount == 0) {
+                            appliedGitMessage(app.container.treeRepository.refreshFromGit())
+                        } else {
+                            runCatching { app.container.treeRepository.pushNow() }
+                                .getOrElse { it.message ?: "Не удалось отправить в Git" }
+                        }
+                    }
+                    is RemoteRefresh.Diverged -> gitChoice = result
+                    is RemoteRefresh.Updated -> updatedMessage = "Информация обновлена. В древе ${result.count} чел."
+                    RemoteRefresh.Unchanged -> {
+                        updatedMessage = if (state.people.isEmpty() && settings.gitConfigured) {
+                            appliedGitMessage(app.container.treeRepository.refreshFromGit())
+                        } else {
+                            "Телефон и Git уже совпадают."
+                        }
+                    }
+                    RemoteRefresh.NotConfigured -> updatedMessage =
+                        "Git не настроен. Откройте настройки и укажите репозиторий и токен."
+                    is RemoteRefresh.Failed -> developerMessage = result.message
+                }
+            } finally {
+                refreshing = false
+            }
+        }
+    }
+
     HdScaffold(
         title = "Древо by HDLabs",
         titleContent = { HdLabsBrandTitle() },
         scroll = false,
-        minimalTopBar = landscape,
+        hideTopBar = landscape,
+        contentPadding = if (landscape) PaddingValues(0.dp) else PaddingValues(horizontal = 16.dp, vertical = 8.dp),
         progressMessage = if (refreshing) "Обновление из Git…" else null,
         actions = {
-            IconButton(onClick = {
-                if (refreshing) return@IconButton
-                scope.launch {
-                    refreshing = true
-                    try {
-                        when (val result = app.container.treeRepository.inspectGit()) {
-                            is RemoteRefresh.Incoming -> updatedMessage = appliedGitMessage(
-                                app.container.treeRepository.refreshFromGit(),
-                            )
-                            is RemoteRefresh.LocalAhead -> {
-                                updatedMessage = if (livingCount == 0) {
-                                    appliedGitMessage(app.container.treeRepository.refreshFromGit())
-                                } else {
-                                    runCatching { app.container.treeRepository.pushNow() }
-                                        .getOrElse { it.message ?: "Не удалось отправить в Git" }
-                                }
-                            }
-                            is RemoteRefresh.Diverged -> gitChoice = result
-                            is RemoteRefresh.Updated -> updatedMessage = "Информация обновлена. В древе ${result.count} чел."
-                            RemoteRefresh.Unchanged -> {
-                                updatedMessage = if (state.people.isEmpty() && settings.gitConfigured) {
-                                    appliedGitMessage(app.container.treeRepository.refreshFromGit())
-                                } else {
-                                    "Телефон и Git уже совпадают."
-                                }
-                            }
-                            RemoteRefresh.NotConfigured -> updatedMessage =
-                                "Git не настроен. Откройте настройки и укажите репозиторий и токен."
-                            is RemoteRefresh.Failed -> developerMessage = result.message
-                        }
-                    } finally {
-                        refreshing = false
-                    }
-                }
-            }) {
-                if (refreshing) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(22.dp),
-                        strokeWidth = 2.dp,
-                        color = HdOrange,
-                    )
-                } else {
-                    Icon(Icons.Filled.Refresh, contentDescription = "Обновить информацию", tint = HdTextPrimary)
-                }
-            }
-            IconButton(onClick = { nav.navigate(Routes.TREE_HELP) }) {
-                Icon(Icons.Filled.HelpOutline, contentDescription = "Справка", tint = HdTextPrimary)
-            }
-            IconButton(onClick = { nav.navigate(Routes.SETTINGS) }) {
-                Icon(Icons.Filled.Settings, contentDescription = "Настройки", tint = HdTextPrimary)
+            if (!landscape) {
+                TreeScreenToolbar(
+                    refreshing = refreshing,
+                    onGitRefresh = onGitRefresh,
+                    onHelp = { nav.navigate(Routes.TREE_HELP) },
+                    onSettings = { nav.navigate(Routes.SETTINGS) },
+                )
             }
         },
     ) {
-        Column(Modifier.fillMaxSize()) {
+        Box(Modifier.fillMaxSize()) {
+            Column(Modifier.fillMaxSize()) {
             if (!landscape) {
                 if (state.people.isNotEmpty()) {
                     Text(
@@ -314,6 +310,8 @@ fun TreeScreen(nav: NavHostController, highlight: String) {
                         centerToken = centerToken,
                         pendingLinkId = pendingLinkId,
                         detachedBranchIds = detachedBranchIds,
+                        homePersonId = settings.homePersonId,
+                        compactChrome = landscape,
                         modifier = Modifier.weight(1f),
                         onSelect = { person ->
                             val branchPick = pendingBranchConnect
@@ -405,6 +403,19 @@ fun TreeScreen(nav: NavHostController, highlight: String) {
                         }
                     }
                 }
+            }
+            }
+            if (landscape) {
+                TreeScreenToolbar(
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .statusBarsPadding()
+                        .padding(top = 2.dp, end = 4.dp),
+                    refreshing = refreshing,
+                    onGitRefresh = onGitRefresh,
+                    onHelp = { nav.navigate(Routes.TREE_HELP) },
+                    onSettings = { nav.navigate(Routes.SETTINGS) },
+                )
             }
         }
     }
@@ -568,6 +579,35 @@ private fun appliedGitMessage(result: RemoteRefresh): String = when (result) {
     is RemoteRefresh.Incoming -> "В Git другая версия, ${result.count} чел."
     is RemoteRefresh.LocalAhead -> "На телефоне есть правки, которых нет в Git."
     is RemoteRefresh.Diverged -> "В Git другая версия, ${result.count} чел."
+}
+
+@Composable
+private fun TreeScreenToolbar(
+    refreshing: Boolean,
+    onGitRefresh: () -> Unit,
+    onHelp: () -> Unit,
+    onSettings: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Row(modifier, verticalAlignment = Alignment.CenterVertically) {
+        IconButton(onClick = onGitRefresh) {
+            if (refreshing) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(22.dp),
+                    strokeWidth = 2.dp,
+                    color = HdOrange,
+                )
+            } else {
+                Icon(Icons.Filled.Refresh, contentDescription = "Обновить информацию", tint = HdTextPrimary)
+            }
+        }
+        IconButton(onClick = onHelp) {
+            Icon(Icons.Filled.HelpOutline, contentDescription = "Справка", tint = HdTextPrimary)
+        }
+        IconButton(onClick = onSettings) {
+            Icon(Icons.Filled.Settings, contentDescription = "Настройки", tint = HdTextPrimary)
+        }
+    }
 }
 
 @Composable

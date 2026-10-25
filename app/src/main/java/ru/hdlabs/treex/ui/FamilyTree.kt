@@ -95,13 +95,17 @@ fun FamilyTree(
     centerToken: Int,
     pendingLinkId: String?,
     detachedBranchIds: Set<String> = emptySet(),
+    homePersonId: String = "",
+    compactChrome: Boolean = false,
     modifier: Modifier = Modifier,
     onSelect: (PersonEntity) -> Unit,
     onOpenDetail: (PersonEntity) -> Unit,
     onHoldLink: (String) -> Unit,
 ) {
     val placement = remember(people, unions, openLinks) {
-        runCatching { TreeLayout.place(people, unions, openLinks) }.getOrElse { error ->
+        runCatching {
+            TreeLayout.place(people, unions, openLinks, homePersonId = homePersonId.ifBlank { null })
+        }.getOrElse { error ->
             AppEventLog.error("tree", "Не удалось разложить древо на экране", error)
             TreePlacement(emptyList(), emptyList(), emptyList(), TreeLayout.CARD_W, TreeLayout.CARD_H)
         }
@@ -215,11 +219,13 @@ fun FamilyTree(
                 }
             }
         }
-        TextButton(
-            onClick = { refit += 1 },
-            modifier = Modifier.align(Alignment.TopEnd),
-        ) {
-            Text("Всё древо", color = HdOrange, fontWeight = FontWeight.SemiBold)
+        if (!compactChrome) {
+            TextButton(
+                onClick = { refit += 1 },
+                modifier = Modifier.align(Alignment.TopEnd),
+            ) {
+                Text("Всё древо", color = HdOrange, fontWeight = FontWeight.SemiBold)
+            }
         }
     }
 }
