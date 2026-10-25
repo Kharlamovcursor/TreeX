@@ -6,6 +6,7 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
+import ru.hdlabs.treex.sync.FamilyGitConfig
 
 private val Context.settingsStore by preferencesDataStore("treex-settings")
 
@@ -37,15 +38,17 @@ class SettingsRepository(private val context: Context) {
     private val homeKey = stringPreferencesKey("home_person_id")
 
     val settings: Flow<AppSettings> = context.settingsStore.data.map { prefs ->
-        AppSettings(
-            githubToken = prefs[tokenKey].orEmpty(),
-            githubOwner = prefs[ownerKey].orEmpty(),
-            githubRepo = prefs[repoKey].orEmpty(),
-            githubBranch = prefs[branchKey].orEmpty().ifBlank { "main" },
-            githubPath = prefs[pathKey].orEmpty().ifBlank { "family/tree.json" },
-            telegramBotToken = prefs[botTokenKey].orEmpty(),
-            telegramChatId = prefs[chatKey].orEmpty(),
-            homePersonId = prefs[homeKey].orEmpty(),
+        FamilyGitConfig.resolve(
+            AppSettings(
+                githubToken = prefs[tokenKey].orEmpty(),
+                githubOwner = prefs[ownerKey].orEmpty(),
+                githubRepo = prefs[repoKey].orEmpty(),
+                githubBranch = prefs[branchKey].orEmpty().ifBlank { "main" },
+                githubPath = prefs[pathKey].orEmpty().ifBlank { "family/tree.json" },
+                telegramBotToken = prefs[botTokenKey].orEmpty(),
+                telegramChatId = prefs[chatKey].orEmpty(),
+                homePersonId = prefs[homeKey].orEmpty(),
+            ),
         )
     }
 

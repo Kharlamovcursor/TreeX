@@ -1,0 +1,12 @@
+# Скопируйте в local.properties (файл не попадает в git).
+# Семейный Git: токен попадёт только в APK при сборке, не в GitHub-репозиторий приложения.
+# Токен GitHub: только право contents, лучше fine-grained на один приватный репозиторий с древом.
+github.family.token=
+github.family.owner=
+github.family.repo=
+github.family.branch=main
+github.family.path=family/tree.json
+
+# Необязательно: ссылка и бот для обратной связи в Telegram
+telegram.feedback.url=https://t.me/Yakofffff
+telegram.feedback.bot=

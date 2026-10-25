@@ -34,6 +34,7 @@ import ru.hdlabs.treex.data.SnapshotInfo
 import ru.hdlabs.treex.data.settings.AppSettings
 import ru.hdlabs.treex.feedback.MaxFeedback
 import ru.hdlabs.treex.feedback.TelegramFeedback
+import ru.hdlabs.treex.sync.FamilyGitConfig
 import ru.hdlabs.treex.navigation.Routes
 import ru.hdlabs.treex.sync.GitHubTreeSync
 import ru.hdlabs.treex.sync.TelegramBackup
@@ -42,6 +43,7 @@ import ru.hdlabs.treex.ui.components.HdPrimaryButton
 import ru.hdlabs.treex.ui.components.HdScaffold
 import ru.hdlabs.treex.ui.components.HdSecondaryButton
 import ru.hdlabs.treex.ui.components.HdTextField
+import ru.hdlabs.treex.ui.theme.HdOrange
 import ru.hdlabs.treex.ui.theme.HdTextPrimary
 import ru.hdlabs.treex.ui.theme.HdTextSecondary
 import ru.hdlabs.treex.update.ApkDownloadHelper
@@ -159,29 +161,42 @@ fun SettingsScreen(nav: NavHostController) {
         Spacer(Modifier.height(16.dp))
         HdCard {
             Text("Git", color = HdTextPrimary, fontWeight = FontWeight.SemiBold)
-            Text(
-                "Своего сервера нет. Приватный репозиторий GitHub хранит версии JSON без фото: каждую правку можно откатить. Токен нужен с правом contents. Фото остаются на телефоне и в ZIP.",
-                color = HdTextSecondary,
-                modifier = Modifier.padding(top = 6.dp, bottom = 8.dp),
-            )
-            HdTextField(token, { token = it }, "Токен GitHub", visualTransformation = PasswordVisualTransformation())
-            HdTextField(owner, { owner = it }, "Владелец")
-            HdTextField(repoName, { repoName = it }, "Репозиторий")
-            HdTextField(branch, { branch = it }, "Ветка")
-            HdTextField(path, { path = it }, "Путь к файлу")
-            Spacer(Modifier.height(8.dp))
-            HdPrimaryButton("Сохранить Git") {
-                scope.launch {
-                    app.container.settingsRepository.update {
-                        it.copy(
-                            githubToken = token,
-                            githubOwner = owner,
-                            githubRepo = repoName,
-                            githubBranch = branch,
-                            githubPath = path,
-                        )
+            if (FamilyGitConfig.isEmbedded()) {
+                Text(
+                    "Семейный Git уже встроен в приложение. Родственникам ничего вводить не нужно: древо само уходит в ваш репозиторий и оттуда обновляется. Токен в телефон не сохраняется отдельно.",
+                    color = HdTextSecondary,
+                    modifier = Modifier.padding(top = 6.dp, bottom = 8.dp),
+                )
+                Text(
+                    "${settings.githubOwner}/${settings.githubRepo}, ветка ${settings.githubBranch}, файл ${settings.githubPath}",
+                    color = HdOrange,
+                    modifier = Modifier.padding(bottom = 8.dp),
+                )
+            } else {
+                Text(
+                    "Приватный репозиторий GitHub хранит версии JSON без фото. Для сборки только для семьи токен можно вшить в local.properties — см. local.properties.example.",
+                    color = HdTextSecondary,
+                    modifier = Modifier.padding(top = 6.dp, bottom = 8.dp),
+                )
+                HdTextField(token, { token = it }, "Токен GitHub", visualTransformation = PasswordVisualTransformation())
+                HdTextField(owner, { owner = it }, "Владелец")
+                HdTextField(repoName, { repoName = it }, "Репозиторий")
+                HdTextField(branch, { branch = it }, "Ветка")
+                HdTextField(path, { path = it }, "Путь к файлу")
+                Spacer(Modifier.height(8.dp))
+                HdPrimaryButton("Сохранить Git") {
+                    scope.launch {
+                        app.container.settingsRepository.update {
+                            it.copy(
+                                githubToken = token,
+                                githubOwner = owner,
+                                githubRepo = repoName,
+                                githubBranch = branch,
+                                githubPath = path,
+                            )
+                        }
+                        message = "Настройки Git сохранены"
                     }
-                    message = "Настройки Git сохранены"
                 }
             }
             Spacer(Modifier.height(8.dp))

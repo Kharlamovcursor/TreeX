@@ -48,6 +48,19 @@ android {
             "TELEGRAM_FEEDBACK_BOT",
             gradleStringLiteral(localProp("telegram.feedback.bot")),
         )
+        buildConfigField("String", "GITHUB_FAMILY_TOKEN", gradleStringLiteral(localProp("github.family.token")))
+        buildConfigField("String", "GITHUB_FAMILY_OWNER", gradleStringLiteral(localProp("github.family.owner")))
+        buildConfigField("String", "GITHUB_FAMILY_REPO", gradleStringLiteral(localProp("github.family.repo")))
+        buildConfigField(
+            "String",
+            "GITHUB_FAMILY_BRANCH",
+            gradleStringLiteral(localProp("github.family.branch").ifBlank { "main" }),
+        )
+        buildConfigField(
+            "String",
+            "GITHUB_FAMILY_PATH",
+            gradleStringLiteral(localProp("github.family.path").ifBlank { "family/tree.json" }),
+        )
     }
 
     signingConfigs {
