@@ -6,4 +6,5 @@
     <exclude domain="file" path="photos" />
     <exclude domain="file" path="history" />
     <exclude domain="file" path="datastore" />
+    <exclude domain="file" path="open-links.json" />
 </full-backup-content>

@@ -7,10 +7,12 @@
         <exclude domain="file" path="photos" />
         <exclude domain="file" path="history" />
         <exclude domain="file" path="datastore" />
+        <exclude domain="file" path="open-links.json" />
     </cloud-backup>
     <device-transfer>
         <include domain="database" path="treex.db" />
         <include domain="file" path="photos" />
         <include domain="file" path="history" />
+        <include domain="file" path="open-links.json" />
     </device-transfer>
 </data-extraction-rules>

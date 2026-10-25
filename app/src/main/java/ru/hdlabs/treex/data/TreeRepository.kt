@@ -26,7 +26,14 @@ import ru.hdlabs.treex.data.local.AppDatabase
 import ru.hdlabs.treex.data.local.PersonEntity
 import ru.hdlabs.treex.data.local.UnionEntity
 import ru.hdlabs.treex.data.settings.SettingsRepository
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
+import ru.hdlabs.treex.domain.OpenLink
 import ru.hdlabs.treex.domain.RelativeAttach
+import ru.hdlabs.treex.domain.linksAfterRemoval
+import ru.hdlabs.treex.domain.reattachPeople
+import ru.hdlabs.treex.domain.reattachSpouse
+import ru.hdlabs.treex.domain.stableUnionId
 import ru.hdlabs.treex.domain.SpouseDraft
 import ru.hdlabs.treex.domain.TreeRules
 import ru.hdlabs.treex.domain.mergePerson
@@ -74,6 +81,9 @@ class TreeRepository(
     private var pushJob: Job? = null
     private val syncNoteState = MutableStateFlow<String?>(null)
     val syncNote: StateFlow<String?> = syncNoteState
+    private val linkJson = Json { ignoreUnknownKeys = true; encodeDefaults = true }
+    private val openLinksState = MutableStateFlow(loadOpenLinks())
+    val openLinks: StateFlow<List<OpenLink>> = openLinksState
 
     fun observe(): Flow<TreeState> = combine(peopleDao.observeAll(), unionDao.observeAll()) { people, unions ->
         TreeState(people, unions)
@@ -176,7 +186,10 @@ class TreeRepository(
         mutex.withLock {
             database.withTransaction {
                 snapshotLocked(readLocked())
-                peopleDao.all().filter { it.fatherId == id || it.motherId == id }.forEach { child ->
+                val people = peopleDao.all()
+                val removed = people.find { it.id == id } ?: return@withTransaction
+                val fresh = linksAfterRemoval(removed, people, unionDao.all())
+                people.filter { it.fatherId == id || it.motherId == id }.forEach { child ->
                     peopleDao.upsert(
                         child.copy(
                             fatherId = child.fatherId?.takeIf { it != id },
@@ -185,11 +198,40 @@ class TreeRepository(
                         ),
                     )
                 }
-                val photo = peopleDao.get(id)?.photoFile.orEmpty()
+                val photo = removed.photoFile
                 unionDao.deleteInvolving(id)
                 peopleDao.delete(id)
                 PhotoStore.delete(context, photo)
                 generation += 1
+                val kept = openLinksState.value.filter { link ->
+                    link.ownerId != id && link.anchorId != id && id !in link.childIds
+                }
+                writeOpenLinks(kept + fresh)
+            }
+        }
+        schedulePush()
+    }
+
+    suspend fun attachOpenLink(linkId: String, targetId: String) {
+        mutex.withLock {
+            database.withTransaction {
+                val link = openLinksState.value.find { it.id == linkId } ?: return@withTransaction
+                val people = peopleDao.all()
+                val target = people.find { it.id == targetId } ?: return@withTransaction
+                val updates = reattachPeople(link, target, people)
+                val spouse = reattachSpouse(link, targetId)
+                if (updates.isEmpty() && spouse == null) return@withTransaction
+                snapshotLocked(readLocked())
+                updates.forEach { peopleDao.upsert(it) }
+                if (spouse != null) {
+                    val (first, second) = spouse
+                    val known = unionDao.all().any { setOf(it.partnerAId, it.partnerBId) == setOf(first, second) }
+                    if (!known && first != second) {
+                        unionDao.upsertAll(listOf(UnionEntity(stableUnionId(first, second), first, second)))
+                    }
+                }
+                generation += 1
+                writeOpenLinks(openLinksState.value.filter { it.id != linkId })
             }
         }
         schedulePush()
@@ -424,6 +466,7 @@ class TreeRepository(
         unionDao.deleteAll()
         peopleDao.upsertAll(normalized.people.map { it.toEntity() })
         unionDao.upsertAll(normalized.unions.map { UnionEntity(it.id, it.partnerAId, it.partnerBId, it.marriedOn) })
+        pruneOpenLinks(normalized.people.map { it.id }.toSet())
     }
 
     private suspend fun snapshotLocked(document: TreeDocument) {
@@ -443,6 +486,28 @@ class TreeRepository(
     private fun historyDir(): File = File(context.filesDir, "history").apply { mkdirs() }
 
     private fun markerFile(): File = File(context.filesDir, "git-sync.txt")
+
+    private fun openLinksFile(): File = File(context.filesDir, "open-links.json")
+
+    private fun loadOpenLinks(): List<OpenLink> = runCatching {
+        val file = openLinksFile()
+        if (!file.isFile) emptyList() else linkJson.decodeFromString<List<OpenLink>>(file.readText())
+    }.getOrDefault(emptyList())
+
+    private fun writeOpenLinks(links: List<OpenLink>) {
+        openLinksState.value = links
+        runCatching {
+            if (links.isEmpty()) openLinksFile().delete()
+            else openLinksFile().writeText(linkJson.encodeToString(links))
+        }
+    }
+
+    private fun pruneOpenLinks(valid: Set<String>) {
+        val next = openLinksState.value.filter { link ->
+            link.ownerId in valid && link.anchorId in valid && link.childIds.all { it in valid }
+        }
+        if (next.size != openLinksState.value.size) writeOpenLinks(next)
+    }
 
     private fun readMarker(): GitMarker? {
         val lines = markerFile().takeIf { it.isFile }?.readLines().orEmpty()

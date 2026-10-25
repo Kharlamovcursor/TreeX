@@ -59,6 +59,8 @@ import ru.hdlabs.treex.domain.fullName
 import ru.hdlabs.treex.domain.lifeLine
 import ru.hdlabs.treex.domain.matchesQuery
 import ru.hdlabs.treex.domain.addSpouseLabel
+import ru.hdlabs.treex.domain.OpenLink
+import ru.hdlabs.treex.feedback.MaxFeedback
 import ru.hdlabs.treex.feedback.TelegramFeedback
 import ru.hdlabs.treex.navigation.Routes
 import ru.hdlabs.treex.ui.components.HdPrimaryButton
@@ -78,6 +80,7 @@ fun TreeScreen(nav: NavHostController, highlight: String) {
     val state by app.container.treeRepository.observe().collectAsStateWithLifecycle(TreeState())
     val settings by app.container.settingsRepository.settings.collectAsStateWithLifecycle(AppSettings())
     val syncNote by app.container.treeRepository.syncNote.collectAsStateWithLifecycle()
+    val openLinks by app.container.treeRepository.openLinks.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
     var query by remember { mutableStateOf("") }
     var focusId by rememberSaveable { mutableStateOf("") }
@@ -87,6 +90,8 @@ fun TreeScreen(nav: NavHostController, highlight: String) {
     var gitChoice by remember { mutableStateOf<RemoteRefresh.Diverged?>(null) }
     var activeHighlight by remember { mutableStateOf(highlight) }
     var centerToken by remember { mutableIntStateOf(0) }
+    var pendingLinkId by remember { mutableStateOf<String?>(null) }
+    var confirmDelete by remember { mutableStateOf(false) }
 
     LaunchedEffect(highlight) {
         activeHighlight = highlight
@@ -148,7 +153,7 @@ fun TreeScreen(nav: NavHostController, highlight: String) {
             )
             if (state.people.isNotEmpty()) {
                 Text(
-                    "Двумя пальцами уменьшайте и увеличивайте. Оранжевая линия — супруги, синяя — родители и дети.",
+                    "Двумя пальцами уменьшайте и увеличивайте. Оранжевая линия — супруги, синяя — дети. Контур переливается: розовый у женщин, синий у мужчин.",
                     color = HdTextSecondary,
                     modifier = Modifier.padding(top = 4.dp),
                 )
@@ -182,18 +187,43 @@ fun TreeScreen(nav: NavHostController, highlight: String) {
                     FamilyTree(
                         people = state.people,
                         unions = state.unions,
+                        openLinks = openLinks,
                         selectedId = focus.id,
                         freshId = activeHighlight,
                         centerToken = centerToken,
+                        pendingLinkId = pendingLinkId,
                         modifier = Modifier.weight(1f),
-                        onSelect = { focusId = it.id },
+                        onSelect = { person ->
+                            val linkId = pendingLinkId
+                            if (linkId != null) {
+                                pendingLinkId = null
+                                scope.launch { app.container.treeRepository.attachOpenLink(linkId, person.id) }
+                            } else {
+                                focusId = person.id
+                            }
+                        },
+                        onHoldLink = { pendingLinkId = it },
                     )
+                    if (pendingLinkId != null) {
+                        Text(
+                            "Нажмите карточку, к которой прикрепить эту связь.",
+                            color = HdOrange,
+                            modifier = Modifier.padding(top = 4.dp),
+                        )
+                    } else if (openLinks.isNotEmpty()) {
+                        Text(
+                            "Свободную точку на линии удержите и перенесите на другую карточку.",
+                            color = HdTextSecondary,
+                            modifier = Modifier.padding(top = 4.dp),
+                        )
+                    }
                     PersonActions(
                         focus = focus,
                         people = state.people,
                         isHome = focus.id == settings.homePersonId,
                         onOpen = { nav.navigate(Routes.edit(focus.id)) },
                         onAdd = { role, anchor -> nav.navigate(Routes.edit("new", role, anchor)) },
+                        onDelete = { confirmDelete = true },
                         onMakeHome = {
                             scope.launch {
                                 app.container.settingsRepository.update { it.copy(homePersonId = focus.id) }
@@ -220,9 +250,16 @@ fun TreeScreen(nav: NavHostController, highlight: String) {
             text = { Text(message, color = HdTextSecondary) },
             confirmButton = { HdPrimaryButton("Понятно") { developerMessage = null } },
             dismissButton = {
-                HdSecondaryButton("Написать в Telegram") {
-                    TelegramFeedback.open(context)
-                    developerMessage = null
+                Column {
+                    HdSecondaryButton("Telegram") {
+                        TelegramFeedback.open(context)
+                        developerMessage = null
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    HdSecondaryButton("MAX") {
+                        MaxFeedback.open(context)
+                        developerMessage = null
+                    }
                 }
             },
         )
@@ -256,6 +293,33 @@ fun TreeScreen(nav: NavHostController, highlight: String) {
             },
         )
     }
+    if (confirmDelete && focus != null) {
+        val name = focus.fullName()
+        AlertDialog(
+            onDismissRequest = { confirmDelete = false },
+            title = { Text("Удалить карточку?") },
+            text = {
+                Text(
+                    "$name исчезнет. Остальные люди и их связи останутся. Если человек стоял между родственниками, свободную линию можно удержанием перенести на другую карточку.",
+                    color = HdTextSecondary,
+                )
+            },
+            confirmButton = {
+                HdPrimaryButton("Удалить") {
+                    val id = focus.id
+                    confirmDelete = false
+                    pendingLinkId = null
+                    scope.launch {
+                        if (settings.homePersonId == id) {
+                            app.container.settingsRepository.update { it.copy(homePersonId = "") }
+                        }
+                        app.container.treeRepository.deletePerson(id)
+                    }
+                }
+            },
+            dismissButton = { HdSecondaryButton("Отмена") { confirmDelete = false } },
+        )
+    }
 }
 
 private fun appliedGitMessage(result: RemoteRefresh): String = when (result) {
@@ -275,10 +339,11 @@ private fun PersonActions(
     isHome: Boolean,
     onOpen: () -> Unit,
     onAdd: (role: String, anchor: String) -> Unit,
+    onDelete: () -> Unit,
     onMakeHome: () -> Unit,
 ) {
     val known = people.map { it.id }.toSet()
-    Text(focus.fullName(), color = HdTextPrimary, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+    Text(focus.fullName(), color = HdTextPrimary, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center)
     Spacer(Modifier.height(6.dp))
     Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         TreeAction("Изменить", primary = true, onClick = onOpen)
@@ -288,6 +353,7 @@ private fun PersonActions(
         TreeAction("Добавить ребёнка") { onAdd("child", focus.id) }
         TreeAction("Без родства") { onAdd("", "") }
         if (!isHome) TreeAction("Сделать главным", onClick = onMakeHome)
+        TreeAction("Удалить", onClick = onDelete)
     }
 }
 
@@ -345,9 +411,9 @@ private fun PersonCard(
         Column(Modifier.padding(12.dp), horizontalAlignment = Alignment.CenterHorizontally) {
             PersonAvatar(person, 64.dp)
             Spacer(Modifier.height(8.dp))
-            Text(person.fullName(), color = HdTextPrimary, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center)
+            Text(person.fullName(), color = HdTextPrimary, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center)
             val years = person.lifeLine()
-            if (years.isNotBlank()) Text(years, color = HdTextSecondary, maxLines = 1, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center)
+            if (years.isNotBlank()) Text(years, color = HdTextSecondary, textAlign = TextAlign.Center)
             Text(hint, color = HdOrange, maxLines = 1)
         }
     }

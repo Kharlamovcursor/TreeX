@@ -32,6 +32,7 @@ import ru.hdlabs.treex.backup.BackupZip
 import ru.hdlabs.treex.backup.TreeCodec
 import ru.hdlabs.treex.data.SnapshotInfo
 import ru.hdlabs.treex.data.settings.AppSettings
+import ru.hdlabs.treex.feedback.MaxFeedback
 import ru.hdlabs.treex.feedback.TelegramFeedback
 import ru.hdlabs.treex.navigation.Routes
 import ru.hdlabs.treex.sync.GitHubTreeSync
@@ -254,9 +255,17 @@ fun SettingsScreen(nav: NavHostController) {
         UpdateSection()
         Spacer(Modifier.height(16.dp))
         Text("Связь с разработчиком", color = HdTextPrimary, fontWeight = FontWeight.SemiBold)
-        Text("Откроется Telegram @Yakofffff.", color = HdTextSecondary, modifier = Modifier.padding(top = 4.dp, bottom = 8.dp))
-        HdSecondaryButton("Связаться с разработчиком") {
+        Text(
+            "Telegram @Yakofffff или мессенджер MAX, Yakoff.",
+            color = HdTextSecondary,
+            modifier = Modifier.padding(top = 4.dp, bottom = 8.dp),
+        )
+        HdSecondaryButton("Связаться в Telegram") {
             TelegramFeedback.open(context).onFailure { message = it.message ?: "Не удалось открыть Telegram" }
+        }
+        Spacer(Modifier.height(8.dp))
+        HdSecondaryButton("Связаться в MAX") {
+            MaxFeedback.open(context).onFailure { message = it.message ?: "Не удалось открыть MAX" }
         }
         if (message.isNotBlank()) Text(message, color = HdTextSecondary, modifier = Modifier.padding(top = 12.dp))
         Text("Версия ${BuildConfig.VERSION_NAME}", color = HdTextSecondary, modifier = Modifier.padding(top = 16.dp, bottom = 24.dp))

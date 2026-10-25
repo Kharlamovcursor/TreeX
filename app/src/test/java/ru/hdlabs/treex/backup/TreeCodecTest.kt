@@ -112,6 +112,7 @@ class TreeCodecTest {
         assertEquals(10002, ReleaseVersionParser.parseVersionCode("v1.0.2", 0))
         assertEquals(10004, ReleaseVersionParser.parseVersionCode("v1.0.4", 0))
         assertEquals(10005, ReleaseVersionParser.parseVersionCode("v1.0.5", 0))
+        assertEquals(10006, ReleaseVersionParser.parseVersionCode("v1.0.6", 0))
     }
 
     @Test

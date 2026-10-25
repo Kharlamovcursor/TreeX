@@ -580,7 +580,7 @@ fun PersonDetailScreen(personId: String, nav: NavHostController) {
         AlertDialog(
             onDismissRequest = { confirmDelete = false },
             title = { Text("Удалить карточку?") },
-            text = { Text("Человек исчезнет из древа. Снимок до удаления останется в истории.", color = HdTextSecondary) },
+            text = { Text("Человек исчезнет из древа, остальные связи останутся. Снимок до удаления сохранится в истории. Свободную линию можно удержанием перенести на другую карточку.", color = HdTextSecondary) },
             confirmButton = {
                 HdPrimaryButton("Удалить") {
                     confirmDelete = false

@@ -4,9 +4,11 @@ import ru.hdlabs.treex.data.local.PersonEntity
 import ru.hdlabs.treex.data.local.UnionEntity
 import kotlin.math.max
 
-data class TreeCard(val id: String, val left: Float, val top: Float)
+data class TreeCard(val id: String, val left: Float, val top: Float, val height: Float = TreeLayout.CARD_H)
 
-data class ChildGroup(val parentIds: List<String>, val childIds: List<String>)
+data class ChildGroup(val parentIds: List<String>, val childIds: List<String>, val open: Boolean = false)
+
+data class OpenKnot(val linkId: String, val x: Float, val y: Float)
 
 data class TreePlacement(
     val cards: List<TreeCard>,
@@ -14,15 +16,42 @@ data class TreePlacement(
     val childGroups: List<ChildGroup>,
     val width: Float,
     val height: Float,
+    val knots: List<OpenKnot> = emptyList(),
 )
 
 object TreeLayout {
-    const val CARD_W = 148f
+    const val CARD_W = 168f
     const val CARD_H = 108f
     private const val SPOUSE_GAP = 28f
     private const val HOUSE_GAP = 44f
     private const val ROW_GAP = 76f
     private const val PAD = 16f
+
+    fun cardHeight(person: PersonEntity): Float {
+        val lines = wrapLines(person.fullName(), 14)
+        val years = if (person.birthDate.isBlank() && person.deathDate.isBlank()) 0f else 20f
+        return (60f + lines * 20f + years).coerceAtLeast(CARD_H)
+    }
+
+    fun wrapLines(text: String, perLine: Int): Int {
+        if (text.isBlank() || perLine <= 0) return 1
+        var lines = 1
+        var column = 0
+        text.split(" ").forEach { word ->
+            val parts = if (word.length <= perLine) listOf(word) else word.chunked(perLine)
+            parts.forEach { part ->
+                if (column == 0) {
+                    column = part.length
+                } else if (column + 1 + part.length > perLine) {
+                    lines += 1
+                    column = part.length
+                } else {
+                    column += 1 + part.length
+                }
+            }
+        }
+        return lines
+    }
     fun bands(people: List<PersonEntity>, unions: List<UnionEntity>): List<List<PersonEntity>> {
         if (people.isEmpty()) return emptyList()
         val byId = people.associateBy { it.id }
@@ -95,12 +124,21 @@ object TreeLayout {
             }
     }
 
-    fun place(people: List<PersonEntity>, unions: List<UnionEntity>): TreePlacement {
+    fun place(
+        people: List<PersonEntity>,
+        unions: List<UnionEntity>,
+        openLinks: List<OpenLink> = emptyList(),
+    ): TreePlacement {
         if (people.isEmpty()) return TreePlacement(emptyList(), emptyList(), emptyList(), 0f, 0f)
         val byId = people.associateBy { it.id }
+        val heights = people.associate { it.id to cardHeight(it) }
         val spouses = people.associate { person ->
             person.id to spouseIdsOf(unions, person.id).filter { it in byId && it != person.id }
         }
+        val held = openLinks.filter { it.slot == "bridge" && it.anchorId in byId }
+            .flatMap { it.childIds }
+            .filter { it in byId }
+            .toSet()
         fun hasParents(id: String): Boolean {
             val person = byId[id] ?: return false
             return (person.fatherId != null && person.fatherId in byId) ||
@@ -117,11 +155,15 @@ object TreeLayout {
             val members = orderMembers(safe, spouses, byId, ::isMarriedIn)
             val memberSet = members.toSet()
             val nextStack = stack + memberSet
-            val children = people
-                .filter { child ->
-                    val parents = parentsOf(child)
-                    child.id !in nextStack && parents.isNotEmpty() && parents.all { it in memberSet }
-                }
+            val natural = people.filter { child ->
+                val parents = parentsOf(child)
+                child.id !in nextStack && parents.isNotEmpty() && parents.all { it in memberSet }
+            }
+            val bridged = openLinks.filter { it.slot == "bridge" && it.anchorId in memberSet }
+                .flatMap { it.childIds }
+                .mapNotNull { byId[it] }
+                .filter { it.id !in nextStack && natural.none { child -> child.id == it.id } }
+            val children = (natural + bridged)
                 .sortedWith(compareBy({ it.birthDate }, { it.id }))
                 .map { child -> buildHouse(listOf(child.id), nextStack) }
             return House(safe, members, children)
@@ -130,7 +172,7 @@ object TreeLayout {
         val roots = mutableListOf<House>()
         val seen = mutableSetOf<String>()
         val rootBlood = people.map { it.id }
-            .filter { !hasParents(it) && !isMarriedIn(it) }
+            .filter { it !in held && !hasParents(it) && !isMarriedIn(it) }
             .sortedWith(compareBy({ byId.getValue(it).birthDate }, { byId.getValue(it).lastName }, { it }))
         for (id in rootBlood) {
             if (id in seen) continue
@@ -151,7 +193,7 @@ object TreeLayout {
             house.children.forEach { collect(it) }
         }
         roots.forEach { collect(it) }
-        people.filter { it.id !in placedIds }.sortedBy { it.id }.forEach { person ->
+        people.filter { it.id !in placedIds && it.id !in held }.sortedBy { it.id }.forEach { person ->
             roots.add(buildHouse(listOf(person.id), placedIds.toSet()))
         }
 
@@ -160,7 +202,7 @@ object TreeLayout {
         var cursor = PAD
         roots.forEach { house ->
             measure(house)
-            position(house, cursor, PAD, cards, childGroups, byId)
+            position(house, cursor, PAD, cards, childGroups, byId, heights, openLinks)
             cursor += house.width + HOUSE_GAP
         }
         val spouseLinks = unions.mapNotNull { union ->
@@ -171,8 +213,9 @@ object TreeLayout {
             }
         }.distinct()
         val width = (cards.maxOfOrNull { it.left + CARD_W } ?: PAD) + PAD
-        val height = (cards.maxOfOrNull { it.top + CARD_H } ?: PAD) + PAD
-        return TreePlacement(cards, spouseLinks, childGroups, width, height)
+        val height = (cards.maxOfOrNull { it.top + it.height } ?: PAD) + PAD
+        val knots = openLinks.mapNotNull { link -> knotFor(link, cards) }
+        return TreePlacement(cards, spouseLinks, childGroups, width, height, knots)
     }
 
     private fun orderMembers(
@@ -227,21 +270,31 @@ object TreeLayout {
         cards: MutableList<TreeCard>,
         childGroups: MutableList<ChildGroup>,
         byId: Map<String, PersonEntity>,
+        heights: Map<String, Float>,
+        openLinks: List<OpenLink>,
     ) {
         house.left = left
         house.top = top
         val selfWidth = memberWidth(house.members.size)
         val membersLeft = left + (house.width - selfWidth) / 2f
+        val rowHeight = house.members.maxOf { heights[it] ?: CARD_H }
         house.members.forEachIndexed { index, id ->
-            cards.add(TreeCard(id, membersLeft + index * (CARD_W + SPOUSE_GAP), top))
+            cards.add(
+                TreeCard(
+                    id,
+                    membersLeft + index * (CARD_W + SPOUSE_GAP),
+                    top,
+                    heights[id] ?: CARD_H,
+                ),
+            )
         }
         if (house.children.isNotEmpty()) {
             val childrenWidth = house.children.sumOf { it.width.toDouble() }.toFloat() +
                 (house.children.size - 1) * HOUSE_GAP
             var childLeft = left + (house.width - childrenWidth) / 2f
-            val childTop = top + CARD_H + ROW_GAP
+            val childTop = top + rowHeight + ROW_GAP
             house.children.forEach { child ->
-                position(child, childLeft, childTop, cards, childGroups, byId)
+                position(child, childLeft, childTop, cards, childGroups, byId, heights, openLinks)
                 childLeft += child.width + HOUSE_GAP
             }
             house.children.groupBy { child ->
@@ -253,7 +306,21 @@ object TreeLayout {
                     childGroups.add(ChildGroup(parents, childIds))
                 }
             }
+            openLinks.filter { it.slot == "bridge" && it.anchorId in house.members }.forEach { link ->
+                val childIds = link.childIds.filter { id -> cards.any { it.id == id } }
+                if (childIds.isNotEmpty()) childGroups.add(ChildGroup(listOf(link.anchorId), childIds, open = true))
+            }
         }
+    }
+
+    private fun knotFor(link: OpenLink, cards: List<TreeCard>): OpenKnot? {
+        val owner = cards.find { it.id == link.anchorId } ?: cards.find { it.id == link.ownerId } ?: return null
+        if (link.slot != "bridge") return OpenKnot(link.id, owner.left + CARD_W / 2f, owner.top - 4f)
+        val children = link.childIds.mapNotNull { id -> cards.find { it.id == id } }
+        if (children.isEmpty()) return null
+        val x = children.map { it.left + CARD_W / 2f }.average().toFloat()
+        val y = (owner.top + owner.height + children.minOf { it.top }) / 2f
+        return OpenKnot(link.id, x, y)
     }
 
     private class House(

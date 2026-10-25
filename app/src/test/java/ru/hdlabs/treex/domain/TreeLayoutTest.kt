@@ -5,6 +5,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import ru.hdlabs.treex.data.local.PersonEntity
 import ru.hdlabs.treex.data.local.UnionEntity
+import ru.hdlabs.treex.domain.OpenLink
 import kotlin.math.abs
 import kotlin.math.min
 
@@ -44,13 +45,44 @@ class TreeLayoutTest {
         cardsDoNotOverlap(placed.cards)
     }
 
+    @Test
+    fun longNameGetsATallerCard() {
+        val short = TreeLayout.cardHeight(PersonEntity(id = "a", firstName = "Иван"))
+        val long = TreeLayout.cardHeight(
+            PersonEntity(
+                id = "b",
+                lastName = "Александров",
+                birthLastName = "Петров",
+                firstName = "Александр",
+                middleName = "Александрович",
+            ),
+        )
+        assertTrue(long > short)
+    }
+
+    @Test
+    fun bridgeKeepsDescendantBelowTheSurvivingPerson() {
+        val placed = TreeLayout.place(
+            listOf(
+                PersonEntity(id = "g", gender = "m", lastName = "Дед"),
+                PersonEntity(id = "c", gender = "f", lastName = "Внучка"),
+            ),
+            emptyList(),
+            listOf(OpenLink("k", "bridge", "g", "g", listOf("c"), anchorIsParent = true)),
+        )
+        val card = placed.cards.associateBy { it.id }
+        assertTrue(card.getValue("c").top > card.getValue("g").top)
+        assertEquals(1, placed.knots.size)
+        assertTrue(placed.childGroups.any { it.open && "c" in it.childIds })
+    }
+
     private fun cardsDoNotOverlap(cards: List<TreeCard>) {
         cards.forEach { first ->
             cards.filter { it.id != first.id }.forEach { second ->
                 val separated = first.left + TreeLayout.CARD_W <= second.left + 0.1f ||
                     second.left + TreeLayout.CARD_W <= first.left + 0.1f ||
-                    first.top + TreeLayout.CARD_H <= second.top + 0.1f ||
-                    second.top + TreeLayout.CARD_H <= first.top + 0.1f
+                    first.top + first.height <= second.top + 0.1f ||
+                    second.top + second.height <= first.top + 0.1f
                 assertTrue("${first.id} overlaps ${second.id}", separated)
             }
         }
