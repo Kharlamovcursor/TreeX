@@ -68,8 +68,12 @@ import ru.hdlabs.treex.domain.lifeLine
 import ru.hdlabs.treex.domain.matchesQuery
 import ru.hdlabs.treex.domain.acceptsAsParent
 import ru.hdlabs.treex.domain.addSpouseLabel
+import ru.hdlabs.treex.domain.BranchConnectMode
 import ru.hdlabs.treex.domain.OpenLink
+import ru.hdlabs.treex.domain.branchConnectPrompt
 import ru.hdlabs.treex.domain.describeOpenLink
+import ru.hdlabs.treex.domain.detachedFromMainPersonIds
+import ru.hdlabs.treex.domain.treeComponents
 import ru.hdlabs.treex.feedback.MaxFeedback
 import ru.hdlabs.treex.feedback.TelegramFeedback
 import ru.hdlabs.treex.navigation.Routes
@@ -105,6 +109,8 @@ fun TreeScreen(nav: NavHostController, highlight: String) {
     var pendingLinkId by remember { mutableStateOf<String?>(null) }
     var confirmDelete by remember { mutableStateOf(false) }
     var showOpenLinks by remember { mutableStateOf(false) }
+    var showBranchConnectModes by remember { mutableStateOf(false) }
+    var pendingBranchConnect by remember { mutableStateOf<Pair<String, BranchConnectMode>?>(null) }
     var actionsExpanded by rememberSaveable { mutableStateOf(false) }
 
     LaunchedEffect(highlight) {
@@ -126,6 +132,9 @@ fun TreeScreen(nav: NavHostController, highlight: String) {
     }
 
     val livingCount = state.people.count { !it.vacant }
+    val detachedBranchIds = remember(state.people, state.unions, settings.homePersonId) {
+        detachedFromMainPersonIds(state.people, state.unions, settings.homePersonId)
+    }
     val visible = state.people.filter { person -> person.matchesQuery(query) }
     val focus = state.people.find { it.id == focusId }
 
@@ -199,9 +208,31 @@ fun TreeScreen(nav: NavHostController, highlight: String) {
             if (syncNote != null) {
                 Text(syncNote.orEmpty(), color = HdOrange, modifier = Modifier.padding(top = 4.dp))
             }
+            if (detachedBranchIds.isNotEmpty()) {
+                Text(
+                    "Отдельных веток: ${treeComponentsCount(state, detachedBranchIds)}",
+                    color = HdOrange,
+                    modifier = Modifier.padding(top = 4.dp),
+                )
+            }
+            pendingBranchConnect?.let { (subjectId, mode) ->
+                val subjectName = state.people.find { it.id == subjectId }?.fullName() ?: "Карточка"
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    "«$subjectName»: ${branchConnectPrompt(mode)}. Тапните карточку на основном древе.",
+                    color = HdOrange,
+                )
+                HdSecondaryButton("Отменить связывание") { pendingBranchConnect = null }
+            }
             if (state.people.isNotEmpty()) {
                 Spacer(Modifier.height(6.dp))
                 HdTextField(query, { query = it }, "Поиск")
+                if (query.isBlank()) {
+                    Spacer(Modifier.height(6.dp))
+                    HdSecondaryButton("Отдельная ветка") {
+                        nav.navigate(Routes.edit("new", "branch", ""))
+                    }
+                }
             }
             Spacer(Modifier.height(4.dp))
             when {
@@ -231,8 +262,32 @@ fun TreeScreen(nav: NavHostController, highlight: String) {
                         freshId = activeHighlight,
                         centerToken = centerToken,
                         pendingLinkId = pendingLinkId,
+                        detachedBranchIds = detachedBranchIds,
                         modifier = Modifier.weight(1f),
                         onSelect = { person ->
+                            val branchPick = pendingBranchConnect
+                            if (branchPick != null) {
+                                if (person.id == branchPick.first) {
+                                    updatedMessage = "Выберите карточку на основном древе, не эту же."
+                                    return@FamilyTree
+                                }
+                                pendingBranchConnect = null
+                                scope.launch {
+                                    runCatching {
+                                        app.container.treeRepository.connectBranchToTree(
+                                            branchPick.first,
+                                            person.id,
+                                            branchPick.second,
+                                        )
+                                    }.onSuccess {
+                                        updatedMessage = "Ветка связана с древом."
+                                        centerToken += 1
+                                    }.onFailure { error ->
+                                        updatedMessage = error.message ?: "Не удалось связать ветку"
+                                    }
+                                }
+                                return@FamilyTree
+                            }
                             val linkId = pendingLinkId
                             if (linkId != null) {
                                 val link = openLinks.find { it.id == linkId }
@@ -271,6 +326,8 @@ fun TreeScreen(nav: NavHostController, highlight: String) {
                                 people = state.people,
                                 openLinks = openLinks,
                                 pendingLinkId = pendingLinkId,
+                                pendingBranchConnect = pendingBranchConnect,
+                                isDetachedBranch = focus.id in detachedBranchIds,
                                 isHome = focus.id == settings.homePersonId,
                                 onOpenEditor = { nav.navigate(Routes.edit(focus.id)) },
                                 onOpenDetail = { nav.navigate(Routes.person(focus.id)) },
@@ -282,7 +339,11 @@ fun TreeScreen(nav: NavHostController, highlight: String) {
                                     }
                                 },
                                 onShowOpenLinks = { showOpenLinks = true },
-                                onCancelLinkPick = { pendingLinkId = null },
+                                onCancelLinkPick = {
+                                    pendingLinkId = null
+                                    pendingBranchConnect = null
+                                },
+                                onConnectBranch = { showBranchConnectModes = true },
                                 onCollapse = { actionsExpanded = false },
                             )
                         } else {
@@ -355,6 +416,28 @@ fun TreeScreen(nav: NavHostController, highlight: String) {
             },
         )
     }
+    if (showBranchConnectModes && focus != null) {
+        AlertDialog(
+            onDismissRequest = { showBranchConnectModes = false },
+            title = { Text("Связать с основным древом") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        "Карточка «${focus.fullName()}» сейчас на отдельной ветке. Выберите, кем она приходится человеку на основном древе, затем тапните его карточку.",
+                        color = HdTextSecondary,
+                    )
+                    BranchConnectMode.entries.forEach { mode ->
+                        HdSecondaryButton(branchConnectPrompt(mode)) {
+                            pendingBranchConnect = focus.id to mode
+                            showBranchConnectModes = false
+                            actionsExpanded = false
+                        }
+                    }
+                }
+            },
+            confirmButton = { HdPrimaryButton("Отмена") { showBranchConnectModes = false } },
+        )
+    }
     if (showOpenLinks && openLinks.isNotEmpty()) {
         AlertDialog(
             onDismissRequest = { showOpenLinks = false },
@@ -416,6 +499,16 @@ fun TreeScreen(nav: NavHostController, highlight: String) {
     }
 }
 
+private fun treeComponentsCount(state: TreeState, detachedIds: Set<String>): Int {
+    if (detachedIds.isEmpty()) return 0
+    return treeComponents(
+        state.people.filter { it.id in detachedIds },
+        state.unions.filter { union ->
+            union.partnerAId in detachedIds || union.partnerBId in detachedIds
+        },
+    ).size
+}
+
 private fun appliedGitMessage(result: RemoteRefresh): String = when (result) {
     is RemoteRefresh.Updated -> "Информация обновлена. В древе ${result.count} чел."
     RemoteRefresh.Unchanged -> "Телефон и Git уже совпадают."
@@ -458,6 +551,8 @@ private fun FocusActionPanel(
     people: List<PersonEntity>,
     openLinks: List<OpenLink>,
     pendingLinkId: String?,
+    pendingBranchConnect: Pair<String, BranchConnectMode>?,
+    isDetachedBranch: Boolean,
     isHome: Boolean,
     onOpenEditor: () -> Unit,
     onOpenDetail: () -> Unit,
@@ -466,6 +561,7 @@ private fun FocusActionPanel(
     onMakeHome: () -> Unit,
     onShowOpenLinks: () -> Unit,
     onCancelLinkPick: () -> Unit,
+    onConnectBranch: () -> Unit,
     onCollapse: () -> Unit,
 ) {
     val known = people.map { it.id }.toSet()
@@ -510,10 +606,20 @@ private fun FocusActionPanel(
                 }
             }
         }
-        if (pendingLinkId != null) {
+        if (pendingBranchConnect != null && pendingBranchConnect.first == focus.id) {
+            Spacer(Modifier.height(8.dp))
+            Text(
+                "Тапните карточку на основном древе: ${branchConnectPrompt(pendingBranchConnect.second)}.",
+                color = HdOrange,
+            )
+            HdSecondaryButton("Отменить") { onCancelLinkPick() }
+        } else if (pendingLinkId != null) {
             Spacer(Modifier.height(8.dp))
             Text("Тапните карточку на древе, к которой прикрепить связь.", color = HdOrange)
             HdSecondaryButton("Отменить перенос") { onCancelLinkPick() }
+        } else if (isDetachedBranch) {
+            Spacer(Modifier.height(8.dp))
+            HdPrimaryButton("Связать с основным древом") { onConnectBranch() }
         } else if (openLinks.isNotEmpty()) {
             Spacer(Modifier.height(8.dp))
             HdSecondaryButton("Свободные связи (${openLinks.size})") { onShowOpenLinks() }
@@ -527,7 +633,7 @@ private fun FocusActionPanel(
                 if (focus.motherId !in known) TreeAction("Мать") { onAdd("mother", focus.id) }
                 TreeAction(addSpouseLabel(focus.gender)) { onAdd("spouse", focus.id) }
                 TreeAction("Ребёнок") { onAdd("child", focus.id) }
-                TreeAction("Без родства") { onAdd("", "") }
+                TreeAction("В новой ветке") { onAdd("branch", "") }
             }
         }
     }

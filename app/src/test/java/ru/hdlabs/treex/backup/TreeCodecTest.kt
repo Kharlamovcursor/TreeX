@@ -76,6 +76,26 @@ class TreeCodecTest {
     }
 
     @Test
+    fun normalizeCapitalizesPersonNames() {
+        val document = TreeDocument(
+            people = listOf(
+                PersonRecord(
+                    id = "p1",
+                    lastName = "иванов",
+                    birthLastName = "петрова",
+                    firstName = "иван",
+                    middleName = "иванович",
+                ),
+            ),
+        )
+        val normalized = TreeCodec.normalize(document).people.single()
+        assertEquals("Иванов", normalized.lastName)
+        assertEquals("Петрова", normalized.birthLastName)
+        assertEquals("Иван", normalized.firstName)
+        assertEquals("Иванович", normalized.middleName)
+    }
+
+    @Test
     fun newerSchemaIsRejected() {
         val error = runCatching {
             TreeCodec.decode("""{"format":"hdlabs-tree","version":99,"people":[]}""")

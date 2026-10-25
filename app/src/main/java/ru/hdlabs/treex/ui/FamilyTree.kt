@@ -73,6 +73,7 @@ import ru.hdlabs.treex.data.local.UnionEntity
 import ru.hdlabs.treex.domain.OpenLink
 import ru.hdlabs.treex.domain.TreeLayout
 import ru.hdlabs.treex.domain.TreePlacement
+import ru.hdlabs.treex.diagnostic.AppEventLog
 import ru.hdlabs.treex.domain.fullName
 import ru.hdlabs.treex.domain.isVacantSlot
 import ru.hdlabs.treex.domain.lifeLine
@@ -93,12 +94,18 @@ fun FamilyTree(
     freshId: String,
     centerToken: Int,
     pendingLinkId: String?,
+    detachedBranchIds: Set<String> = emptySet(),
     modifier: Modifier = Modifier,
     onSelect: (PersonEntity) -> Unit,
     onOpenDetail: (PersonEntity) -> Unit,
     onHoldLink: (String) -> Unit,
 ) {
-    val placement = remember(people, unions, openLinks) { TreeLayout.place(people, unions, openLinks) }
+    val placement = remember(people, unions, openLinks) {
+        runCatching { TreeLayout.place(people, unions, openLinks) }.getOrElse { error ->
+            AppEventLog.error("tree", "Не удалось разложить древо на экране", error)
+            TreePlacement(emptyList(), emptyList(), emptyList(), TreeLayout.CARD_W, TreeLayout.CARD_H)
+        }
+    }
     val byId = remember(people) { people.associateBy { it.id } }
     val density = LocalDensity.current
     val scaleAnim = remember { Animatable(1f) }
@@ -188,6 +195,7 @@ fun FamilyTree(
                         person = person,
                         selected = selected,
                         fresh = person.id == freshId,
+                        detachedBranch = person.id in detachedBranchIds,
                         height = card.height,
                         modifier = Modifier
                             .offset(card.left.dp, card.top.dp)
@@ -321,6 +329,7 @@ private fun TreeNode(
     person: PersonEntity,
     selected: Boolean,
     fresh: Boolean,
+    detachedBranch: Boolean,
     height: Float,
     modifier: Modifier = Modifier,
     onSelect: () -> Unit,
@@ -402,6 +411,9 @@ private fun TreeNode(
                     val years = person.lifeLine()
                     if (years.isNotBlank()) {
                         Text(years, color = HdTextSecondary, fontSize = 12.sp, textAlign = TextAlign.Center)
+                    }
+                    if (detachedBranch) {
+                        Text("отд. ветка", color = HdOrange, fontSize = 10.sp, textAlign = TextAlign.Center)
                     }
                 }
             }

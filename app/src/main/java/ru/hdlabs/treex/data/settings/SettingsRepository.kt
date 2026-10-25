@@ -21,12 +21,18 @@ data class AppSettings(
     val telegramChatId: String = "",
     val homePersonId: String = "",
     val lightTheme: Boolean = false,
+    val userLastName: String = "",
+    val userFirstName: String = "",
+    val userMiddleName: String = "",
 ) {
     val gitConfigured: Boolean
         get() = githubToken.isNotBlank() && githubOwner.isNotBlank() && githubRepo.isNotBlank()
 
     val telegramBotConfigured: Boolean
         get() = telegramBotToken.isNotBlank() && telegramChatId.isNotBlank()
+
+    val userProfileComplete: Boolean
+        get() = userLastName.isNotBlank() && userFirstName.isNotBlank()
 }
 
 class SettingsRepository(private val context: Context) {
@@ -39,6 +45,9 @@ class SettingsRepository(private val context: Context) {
     private val chatKey = stringPreferencesKey("telegram_chat_id")
     private val homeKey = stringPreferencesKey("home_person_id")
     private val lightThemeKey = booleanPreferencesKey("light_theme")
+    private val userLastNameKey = stringPreferencesKey("user_last_name")
+    private val userFirstNameKey = stringPreferencesKey("user_first_name")
+    private val userMiddleNameKey = stringPreferencesKey("user_middle_name")
 
     val settings: Flow<AppSettings> = context.settingsStore.data.map { prefs ->
         FamilyGitConfig.resolve(
@@ -52,6 +61,9 @@ class SettingsRepository(private val context: Context) {
                 telegramChatId = prefs[chatKey].orEmpty(),
                 homePersonId = prefs[homeKey].orEmpty(),
                 lightTheme = prefs[lightThemeKey] ?: false,
+                userLastName = prefs[userLastNameKey].orEmpty(),
+                userFirstName = prefs[userFirstNameKey].orEmpty(),
+                userMiddleName = prefs[userMiddleNameKey].orEmpty(),
             ),
         )
     }
@@ -68,6 +80,9 @@ class SettingsRepository(private val context: Context) {
                 telegramChatId = prefs[chatKey].orEmpty(),
                 homePersonId = prefs[homeKey].orEmpty(),
                 lightTheme = prefs[lightThemeKey] ?: false,
+                userLastName = prefs[userLastNameKey].orEmpty(),
+                userFirstName = prefs[userFirstNameKey].orEmpty(),
+                userMiddleName = prefs[userMiddleNameKey].orEmpty(),
             )
             val next = transform(current)
             prefs[tokenKey] = next.githubToken.trim()
@@ -79,6 +94,9 @@ class SettingsRepository(private val context: Context) {
             prefs[chatKey] = next.telegramChatId.trim()
             prefs[homeKey] = next.homePersonId.trim()
             prefs[lightThemeKey] = next.lightTheme
+            prefs[userLastNameKey] = next.userLastName.trim()
+            prefs[userFirstNameKey] = next.userFirstName.trim()
+            prefs[userMiddleNameKey] = next.userMiddleName.trim()
         }
     }
 }

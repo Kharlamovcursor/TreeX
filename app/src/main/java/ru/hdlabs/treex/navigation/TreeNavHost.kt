@@ -31,7 +31,9 @@ import kotlinx.coroutines.withContext
 import ru.hdlabs.treex.BuildConfig
 import ru.hdlabs.treex.TreeXApplication
 import ru.hdlabs.treex.data.RemoteRefresh
+import ru.hdlabs.treex.data.settings.AppSettings
 import ru.hdlabs.treex.ui.HistoryScreen
+import ru.hdlabs.treex.ui.UserOnboardingScreen
 import ru.hdlabs.treex.ui.TreeHelpScreen
 import ru.hdlabs.treex.ui.UserGuideScreen
 import ru.hdlabs.treex.ui.PersonDetailScreen
@@ -71,11 +73,17 @@ fun TreeNavHost() {
     val nav = rememberNavController()
     val motion = LocalHdMotion.current
     val scope = rememberCoroutineScope()
+    val settings by app.container.settingsRepository.settings.collectAsStateWithLifecycle(AppSettings())
     var pendingUpdate by remember { mutableStateOf<UpdateInfo?>(null) }
     var pendingGit by remember { mutableStateOf<RemoteRefresh?>(null) }
     var gitNotice by remember { mutableStateOf<String?>(null) }
     var updateError by remember { mutableStateOf<String?>(null) }
     var updateDownloading by remember { mutableStateOf(false) }
+
+    if (!settings.userProfileComplete) {
+        UserOnboardingScreen()
+        return
+    }
 
     LaunchedEffect(Unit) {
         launch {
@@ -97,7 +105,12 @@ fun TreeNavHost() {
             }
         }
         launch {
-            when (val git = app.container.treeRepository.pullFromGitOnLaunch()) {
+            val git = runCatching { app.container.treeRepository.pullFromGitOnLaunch() }
+                .onFailure { error ->
+                    AppEventLog.error("git", "Сбой синхронизации при запуске", error)
+                }
+                .getOrNull()
+            when (git) {
                 is RemoteRefresh.Diverged -> pendingGit = git
                 is RemoteRefresh.Updated -> {
                     AppEventLog.info("git", "Автообновление при запуске: ${git.count} чел.")

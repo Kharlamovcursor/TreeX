@@ -361,9 +361,13 @@ fun PersonEditorScreen(routeId: String, role: String, anchor: String, nav: NavHo
         role == "spouse" && host?.gender == "f" -> "Новый супруг"
         role == "spouse" -> "Новый супруг"
         role == "child" -> "Новый ребёнок"
+        role == "branch" -> "Новая отдельная ветка"
         else -> "Новый человек"
     }
     val relationHint = when {
+        role == "branch" && creating ->
+            "Карточка появится отдельно на древе. Развивайте ветку родителями, детьми и супругами. " +
+                "Связать с основным древом можно с экрана древа — «Связать с основным древом»."
         !creating || host == null -> ""
         role == "father" -> "Это отец для ${host.fullName()}. Фамилия подставится сама."
         role == "mother" -> "Это мать для ${host.fullName()}. Фамилия подставится сама."

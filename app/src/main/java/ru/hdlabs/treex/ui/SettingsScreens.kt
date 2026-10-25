@@ -529,7 +529,8 @@ fun HistoryScreen(nav: NavHostController) {
         Text("Снимок делается перед правкой, импортом и удалением. Хранятся последние 30.", color = HdTextSecondary, modifier = Modifier.padding(bottom = 8.dp))
         if (snapshots.isEmpty()) Text("Снимков пока нет", color = HdTextSecondary)
         snapshots.forEach { snapshot ->
-            HdSecondaryButton("${snapshot.label} · ${snapshot.people} чел.") { pendingSnapshot = snapshot }
+            val who = snapshot.author?.let { "$it · " } ?: ""
+            HdSecondaryButton("$who${snapshot.label} · ${snapshot.people} чел.") { pendingSnapshot = snapshot }
             Spacer(Modifier.height(8.dp))
         }
         Spacer(Modifier.height(8.dp))

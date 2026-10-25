@@ -2,6 +2,7 @@ package ru.hdlabs.treex.backup
 
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import ru.hdlabs.treex.domain.capitalizePersonName
 import java.security.MessageDigest
 
 object TreeCodec {
@@ -47,6 +48,10 @@ object TreeCodec {
             .sortedBy { it.id }
             .map { person ->
                 person.copy(
+                    lastName = capitalizePersonName(person.lastName),
+                    birthLastName = capitalizePersonName(person.birthLastName),
+                    firstName = capitalizePersonName(person.firstName),
+                    middleName = capitalizePersonName(person.middleName),
                     gender = if (person.gender == "m" || person.gender == "f") person.gender else "u",
                     fatherId = person.fatherId?.takeIf { it in ids && it != person.id },
                     motherId = person.motherId?.takeIf { it in ids && it != person.id && it != person.fatherId },

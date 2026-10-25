@@ -41,6 +41,11 @@ import ru.hdlabs.treex.domain.mergePerson
 import ru.hdlabs.treex.domain.mergeSpouseDrafts
 import ru.hdlabs.treex.domain.spouseDraftsOf
 import ru.hdlabs.treex.domain.acceptsAsParent
+import ru.hdlabs.treex.domain.BranchConnectMode
+import ru.hdlabs.treex.domain.capitalizePersonName
+import ru.hdlabs.treex.domain.treeGitCommitMessage
+import ru.hdlabs.treex.domain.userFio
+import ru.hdlabs.treex.domain.planBranchConnect
 import ru.hdlabs.treex.sync.GitHubTreeSync
 import ru.hdlabs.treex.diagnostic.AppEventLog
 import ru.hdlabs.treex.util.NetworkHelper
@@ -60,6 +65,7 @@ data class SnapshotInfo(
     val fileName: String,
     val label: String,
     val people: Int,
+    val author: String? = null,
 )
 
 sealed interface RemoteRefresh {
@@ -115,6 +121,10 @@ class TreeRepository(
                 val motherId = merged.motherId?.takeIf { it in knownIds && it != merged.id && it != fatherId }
                 val named = merged.firstName.isNotBlank() || merged.lastName.isNotBlank() || merged.middleName.isNotBlank()
                 val clean = merged.copy(
+                    lastName = capitalizePersonName(merged.lastName),
+                    birthLastName = capitalizePersonName(merged.birthLastName),
+                    firstName = capitalizePersonName(merged.firstName),
+                    middleName = capitalizePersonName(merged.middleName),
                     fatherId = fatherId,
                     motherId = motherId,
                     vacant = merged.vacant && !named,
@@ -343,6 +353,33 @@ class TreeRepository(
         schedulePush()
     }
 
+    suspend fun connectBranchToTree(subjectId: String, targetId: String, mode: BranchConnectMode) {
+        mutex.withLock {
+            database.withTransaction {
+                val people = peopleDao.all()
+                val unions = unionDao.all()
+                val subject = people.find { it.id == subjectId }
+                    ?: throw IllegalArgumentException("Карточка не найдена")
+                val target = people.find { it.id == targetId }
+                    ?: throw IllegalArgumentException("Карточка не найдена")
+                val plan = planBranchConnect(subject, target, mode, people, unions)
+                if (plan.peopleUpdates.isEmpty() && plan.unionPartners == null) return@withTransaction
+                snapshotLocked(readLocked())
+                plan.peopleUpdates.forEach { peopleDao.upsert(it) }
+                plan.unionPartners?.let { (first, second) ->
+                    val a = minOf(first, second)
+                    val b = maxOf(first, second)
+                    val known = unions.any { setOf(it.partnerAId, it.partnerBId) == setOf(a, b) }
+                    if (!known) {
+                        unionDao.upsertAll(listOf(UnionEntity(stableUnionId(a, b), a, b)))
+                    }
+                }
+                generation += 1
+            }
+        }
+        schedulePush()
+    }
+
     suspend fun snapshotNow() {
         mutex.withLock { snapshotLocked(readLocked()) }
     }
@@ -352,7 +389,8 @@ class TreeRepository(
             .sortedByDescending { it.name }
             .map { file ->
                 val count = runCatching { TreeCodec.decode(file.readText()).people.size }.getOrDefault(0)
-                SnapshotInfo(file.name, file.name.removeSuffix(".json"), count)
+                val author = snapshotAuthorFile(file).takeIf { it.isFile }?.readText()?.trim()?.takeIf { it.isNotEmpty() }
+                SnapshotInfo(file.name, file.name.removeSuffix(".json"), count, author)
             }
     }
 
@@ -474,14 +512,7 @@ class TreeRepository(
                     writeMarker(remote.sha, snapshot.localHash)
                     RemoteRefresh.Unchanged
                 } else {
-                    mutex.withLock {
-                        snapshotLocked(readLocked())
-                        replaceLocked(remoteDoc)
-                        generation += 1
-                    }
-                    writeMarker(remote.sha, TreeCodec.contentHash(remoteDoc))
-                    AppEventLog.info("git", "Древо загружено из Git: ${remoteDoc.people.size} чел.")
-                    RemoteRefresh.Updated(remoteDoc.people.size)
+                    applyDocumentFromGit(remoteDoc, remote.sha)
                 }
             },
             onFailure = { error ->
@@ -491,6 +522,28 @@ class TreeRepository(
                 RemoteRefresh.Failed(message)
             },
         )
+    }
+
+    private suspend fun applyDocumentFromGit(remoteDoc: TreeDocument, remoteSha: String): RemoteRefresh {
+        pushJob?.cancel()
+        pushJob = null
+        return try {
+            withContext(Dispatchers.IO) {
+                mutex.withLock {
+                    snapshotLocked(readLocked())
+                    replaceLocked(remoteDoc)
+                    generation += 1
+                }
+            }
+            writeMarker(remoteSha, TreeCodec.contentHash(remoteDoc))
+            AppEventLog.info("git", "Древо загружено из Git: ${remoteDoc.people.size} чел.")
+            RemoteRefresh.Updated(remoteDoc.people.size)
+        } catch (error: Exception) {
+            if (error is kotlinx.coroutines.CancellationException) throw error
+            val message = NetworkHelper.toUserMessage(error) ?: (error.message ?: "Не удалось применить древо из Git")
+            AppEventLog.error("git", message, error)
+            RemoteRefresh.Failed(message)
+        }
     }
 
     suspend fun pushNow(): String {
@@ -536,10 +589,14 @@ class TreeRepository(
         if (!settings.gitConfigured) throw IllegalStateException("Git не настроен")
         val remote = withContext(Dispatchers.IO) { syncFor(settings).fetchExact(sha) }
         val document = TreeCodec.decode(remote.text)
-        mutex.withLock {
-            snapshotLocked(readLocked())
-            replaceLocked(document)
-            generation += 1
+        pushJob?.cancel()
+        pushJob = null
+        withContext(Dispatchers.IO) {
+            mutex.withLock {
+                snapshotLocked(readLocked())
+                replaceLocked(document)
+                generation += 1
+            }
         }
         schedulePush()
     }
@@ -604,8 +661,9 @@ class TreeRepository(
             return false
         }
         val count = TreeCodec.decode(captured.second).people.size
+        val commitMessage = treeGitCommitMessage(settings.userFio(), count)
         val sha = withContext(Dispatchers.IO) {
-            sync.push(captured.second, remote?.sha, "Древо: $count чел.")
+            sync.push(captured.second, remote?.sha, commitMessage)
         }
         writeMarker(sha, localHash)
         val changedDuringUpload = mutex.withLock { generation != captured.first }
@@ -628,10 +686,12 @@ class TreeRepository(
 
     private suspend fun replaceLocked(document: TreeDocument) {
         val normalized = TreeCodec.normalize(document)
-        peopleDao.deleteAll()
-        unionDao.deleteAll()
-        peopleDao.upsertAll(normalized.people.map { it.toEntity() })
-        unionDao.upsertAll(normalized.unions.map { UnionEntity(it.id, it.partnerAId, it.partnerBId, it.marriedOn) })
+        database.withTransaction {
+            peopleDao.deleteAll()
+            unionDao.deleteAll()
+            peopleDao.upsertAll(normalized.people.map { it.toEntity() })
+            unionDao.upsertAll(normalized.unions.map { UnionEntity(it.id, it.partnerAId, it.partnerBId, it.marriedOn) })
+        }
         pruneOpenLinks(normalized.people.map { it.id }.toSet())
     }
 
@@ -645,9 +705,21 @@ class TreeRepository(
             .withZone(ZoneId.systemDefault())
             .format(Instant.now()) + ".json"
         File(dir, name).writeText(text)
+        val author = settingsRepository.settings.first().userFio()
+        if (author.isNotBlank()) {
+            snapshotAuthorFile(File(dir, name)).writeText(author)
+        }
         val files = dir.listFiles { file -> file.extension == "json" }?.sortedBy { it.name }.orEmpty()
-        if (files.size > 30) files.take(files.size - 30).forEach { it.delete() }
+        if (files.size > 30) {
+            files.take(files.size - 30).forEach { file ->
+                file.delete()
+                snapshotAuthorFile(file).delete()
+            }
+        }
     }
+
+    private fun snapshotAuthorFile(snapshotJson: File): File =
+        File(snapshotJson.parentFile, snapshotJson.nameWithoutExtension + ".author")
 
     private fun historyDir(): File = File(context.filesDir, "history").apply { mkdirs() }
 
