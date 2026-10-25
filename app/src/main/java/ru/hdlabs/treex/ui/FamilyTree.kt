@@ -62,6 +62,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
@@ -364,10 +365,13 @@ private fun TreeNode(
             border = BorderStroke(0.dp, Color.Transparent),
             elevation = CardDefaults.cardElevation(defaultElevation = if (selected) 10.dp else 2.dp),
         ) {
-            Column(
-                Modifier.padding(horizontal = 8.dp, vertical = 8.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .padding(horizontal = 8.dp, vertical = 8.dp),
+                contentAlignment = Alignment.Center,
             ) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 if (person.isVacantSlot()) {
                     Text("+", color = HdOrange, fontSize = 28.sp, fontWeight = FontWeight.Light)
                     Text(
@@ -392,12 +396,15 @@ private fun TreeNode(
                         fontSize = 14.sp,
                         lineHeight = 18.sp,
                         textAlign = TextAlign.Center,
+                        maxLines = 3,
+                        overflow = TextOverflow.Ellipsis,
                     )
                     val years = person.lifeLine()
                     if (years.isNotBlank()) {
                         Text(years, color = HdTextSecondary, fontSize = 12.sp, textAlign = TextAlign.Center)
                     }
                 }
+            }
             }
         }
     }

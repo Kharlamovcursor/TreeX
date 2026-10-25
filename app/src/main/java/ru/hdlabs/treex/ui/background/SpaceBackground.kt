@@ -23,6 +23,7 @@ import androidx.lifecycle.compose.currentStateAsState
 import ru.hdlabs.treex.ui.theme.HdBlack
 import ru.hdlabs.treex.ui.theme.HdBlue
 import ru.hdlabs.treex.ui.theme.HdOrange
+import ru.hdlabs.treex.ui.theme.LocalHdPalette
 import kotlin.math.sin
 import kotlin.random.Random
 
@@ -85,15 +86,18 @@ fun SpaceBackground(modifier: Modifier = Modifier) {
         label = "phase",
     )
     val travelPhase = if (animEnabled) phase else 0.35f
+    val palette = LocalHdPalette.current
+    val background = HdBlack
     Canvas(modifier.fillMaxSize()) {
-        drawRect(HdBlack)
+        drawRect(background)
         drawRect(
             Brush.radialGradient(
-                listOf(Color(0xFF102033), HdBlack),
+                listOf(palette.spaceGradientInner, background),
                 center = Offset(size.width * 0.5f, size.height * 0.42f),
                 radius = size.maxDimension * 0.72f,
             ),
         )
+        if (!palette.useSpaceEffects) return@Canvas
         val vanishX = size.width * 0.5f
         val vanishY = size.height * 0.46f
         stars.forEach { star ->

@@ -456,8 +456,34 @@ class TreeRepository(
 
     suspend fun remoteCommits(): List<GitHubTreeSync.RemoteCommit> {
         val settings = settingsRepository.settings.first()
-        if (!settings.gitConfigured) throw IllegalStateException("Git не настроен")
-        return withContext(Dispatchers.IO) { syncFor(settings).listCommits() }
+        if (!settings.gitConfigured) {
+            throw IllegalStateException(
+                "Git не настроен. Укажите репозиторий в настройках разработчика или соберите приложение с family Git в local.properties.",
+            )
+        }
+        return withContext(Dispatchers.IO) {
+            val sync = syncFor(settings)
+            val remote = runCatching { sync.fetch() }.getOrElse { error ->
+                if (error is IllegalStateException) throw error
+                throw IllegalStateException(error.message ?: "Не удалось прочитать Git")
+            }
+            if (remote == null) {
+                throw IllegalStateException(
+                    "В ${settings.githubOwner}/${settings.githubRepo} ещё нет файла «${settings.githubPath}». " +
+                        "В настройках разработчика нажмите «Отправить в Git сейчас».",
+                )
+            }
+            val commits = runCatching { sync.listCommits() }.getOrElse { emptyList() }
+            commits.ifEmpty {
+                listOf(
+                    GitHubTreeSync.RemoteCommit(
+                        sha = remote.sha,
+                        message = "Текущая версия в Git",
+                        date = "",
+                    ),
+                )
+            }
+        }
     }
 
     suspend fun restoreRemote(sha: String) {

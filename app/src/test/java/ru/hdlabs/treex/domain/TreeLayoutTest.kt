@@ -43,6 +43,7 @@ class TreeLayoutTest {
         assertTrue(placed.spouseLinks.any { it.first == "g" || it.second == "g" })
         assertTrue(placed.childGroups.any { "c" in it.childIds && "f" in it.parentIds && "m" in it.parentIds })
         cardsDoNotOverlap(placed.cards)
+        assertEquals(card.getValue("f").height, card.getValue("m").height, 0.5f)
     }
 
     @Test
@@ -58,6 +59,21 @@ class TreeLayoutTest {
             ),
         )
         assertTrue(long > short)
+        val placed = TreeLayout.place(
+            listOf(
+                PersonEntity(id = "h", gender = "m", firstName = "Иван"),
+                PersonEntity(
+                    id = "w",
+                    gender = "f",
+                    lastName = "Александрова",
+                    firstName = "Александра",
+                    middleName = "Александровна",
+                ),
+            ),
+            listOf(UnionEntity("u", "h", "w")),
+        )
+        val card = placed.cards.associateBy { it.id }
+        assertEquals(card.getValue("h").height, card.getValue("w").height, 0.5f)
     }
 
     @Test

@@ -15,12 +15,13 @@ object FamilyGitConfig {
 
     fun resolve(settings: AppSettings): AppSettings {
         if (!isEmbedded()) return settings
+        // Семейная сборка: всегда встроенный репозиторий, чтобы старые значения из DataStore не ломали Git.
         return settings.copy(
-            githubToken = settings.githubToken.ifBlank { embeddedToken },
-            githubOwner = settings.githubOwner.ifBlank { embeddedOwner },
-            githubRepo = settings.githubRepo.ifBlank { embeddedRepo },
-            githubBranch = settings.githubBranch.ifBlank { embeddedBranch },
-            githubPath = settings.githubPath.ifBlank { embeddedPath },
+            githubToken = embeddedToken,
+            githubOwner = embeddedOwner,
+            githubRepo = embeddedRepo,
+            githubBranch = embeddedBranch,
+            githubPath = embeddedPath,
         )
     }
 }

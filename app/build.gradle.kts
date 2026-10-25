@@ -28,9 +28,9 @@ android {
         applicationId = "ru.hdlabs.treex"
         minSdk = 28
         targetSdk = 35
-        // 1.0.9 = 1*10000 + 0*100 + 9. Тег релиза: v1.0.9.
-        versionCode = 10009
-        versionName = "1.0.9"
+        // 1.0.11 = 1*10000 + 0*100 + 11. Тег релиза: v1.0.11.
+        versionCode = 10011
+        versionName = "1.0.11"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
@@ -47,6 +47,11 @@ android {
             "String",
             "TELEGRAM_FEEDBACK_BOT",
             gradleStringLiteral(localProp("telegram.feedback.bot")),
+        )
+        buildConfigField(
+            "String",
+            "MAX_FEEDBACK_URL",
+            gradleStringLiteral(localProp("max.feedback.url")),
         )
         buildConfigField("String", "GITHUB_FAMILY_TOKEN", gradleStringLiteral(localProp("github.family.token")))
         buildConfigField("String", "GITHUB_FAMILY_OWNER", gradleStringLiteral(localProp("github.family.owner")))

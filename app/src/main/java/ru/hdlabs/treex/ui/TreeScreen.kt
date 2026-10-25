@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -30,6 +31,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
@@ -138,6 +140,7 @@ fun TreeScreen(nav: NavHostController, highlight: String) {
     HdScaffold(
         title = "Древо",
         scroll = false,
+        progressMessage = if (refreshing) "Обновление из Git…" else null,
         actions = {
             IconButton(onClick = {
                 if (refreshing) return@IconButton
@@ -161,7 +164,15 @@ fun TreeScreen(nav: NavHostController, highlight: String) {
                     }
                 }
             }) {
-                Icon(Icons.Filled.Refresh, contentDescription = "Обновить информацию", tint = HdTextPrimary)
+                if (refreshing) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(22.dp),
+                        strokeWidth = 2.dp,
+                        color = HdOrange,
+                    )
+                } else {
+                    Icon(Icons.Filled.Refresh, contentDescription = "Обновить информацию", tint = HdTextPrimary)
+                }
             }
             IconButton(onClick = { nav.navigate(Routes.TREE_HELP) }) {
                 Icon(Icons.Filled.HelpOutline, contentDescription = "Справка", tint = HdTextPrimary)

@@ -35,6 +35,7 @@ import ru.hdlabs.treex.ui.HistoryScreen
 import ru.hdlabs.treex.ui.TreeHelpScreen
 import ru.hdlabs.treex.ui.PersonDetailScreen
 import ru.hdlabs.treex.ui.PersonEditorScreen
+import ru.hdlabs.treex.ui.DeveloperSettingsScreen
 import ru.hdlabs.treex.ui.SettingsScreen
 import ru.hdlabs.treex.ui.TreeScreen
 import ru.hdlabs.treex.ui.components.HdPrimaryButton
@@ -52,6 +53,7 @@ object Routes {
     const val SETTINGS = "settings"
     const val HISTORY = "history"
     const val TREE_HELP = "tree-help"
+    const val DEVELOPER_SETTINGS = "developer-settings"
     const val PERSON = "person/{id}"
     const val EDIT = "edit/{id}?role={role}&anchor={anchor}"
     fun person(id: String) = "person/$id"
@@ -115,6 +117,7 @@ fun TreeNavHost() {
             TreeScreen(nav, highlight)
         }
         composable(Routes.SETTINGS) { SettingsScreen(nav) }
+        composable(Routes.DEVELOPER_SETTINGS) { DeveloperSettingsScreen(nav) }
         composable(Routes.HISTORY) { HistoryScreen(nav) }
         composable(Routes.TREE_HELP) { TreeHelpScreen(nav) }
         composable(

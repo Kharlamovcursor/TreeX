@@ -15,7 +15,19 @@ class FamilyGitConfigTest {
     }
 
     @Test
-    fun userOverridesStayWhenPresent() {
+    fun embeddedBuildIgnoresStaleDatastoreOverrides() {
+        if (!FamilyGitConfig.isEmbedded()) return
+        val resolved = FamilyGitConfig.resolve(
+            AppSettings(githubOwner = "wrong", githubRepo = "missing", githubToken = "bad"),
+        )
+        assertEquals(FamilyGitConfig.embeddedOwner, resolved.githubOwner)
+        assertEquals(FamilyGitConfig.embeddedRepo, resolved.githubRepo)
+        assertEquals(FamilyGitConfig.embeddedToken, resolved.githubToken)
+    }
+
+    @Test
+    fun manualSettingsStayWhenNotEmbedded() {
+        if (FamilyGitConfig.isEmbedded()) return
         val resolved = FamilyGitConfig.resolve(
             AppSettings(githubOwner = "custom", githubRepo = "tree", githubToken = "user-token"),
         )

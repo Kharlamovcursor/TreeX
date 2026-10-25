@@ -6,14 +6,20 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -21,7 +27,9 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Card
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -71,6 +79,8 @@ fun HdPrimaryButton(
     text: String,
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
+    loading: Boolean = false,
+    loadingText: String? = null,
     onClick: () -> Unit,
 ) {
     val motion = LocalHdMotion.current
@@ -83,7 +93,7 @@ fun HdPrimaryButton(
     )
     Button(
         onClick = onClick,
-        enabled = enabled,
+        enabled = enabled && !loading,
         interactionSource = interaction,
         modifier = modifier.fillMaxWidth().scale(scale),
         shape = RoundedCornerShape(14.dp),
@@ -98,7 +108,7 @@ fun HdPrimaryButton(
             BorderStroke(1.5.dp, Brush.horizontalGradient(listOf(HdBlue, HdOrange)))
         },
     ) {
-        Text(text, color = HdTextPrimary)
+        HdButtonContent(loading, loadingText ?: text, text)
     }
 }
 
@@ -107,6 +117,8 @@ fun HdSecondaryButton(
     text: String,
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
+    loading: Boolean = false,
+    loadingText: String? = null,
     onClick: () -> Unit,
 ) {
     val motion = LocalHdMotion.current
@@ -119,7 +131,7 @@ fun HdSecondaryButton(
     )
     Button(
         onClick = onClick,
-        enabled = enabled,
+        enabled = enabled && !loading,
         interactionSource = interaction,
         modifier = modifier.fillMaxWidth().scale(scale),
         shape = RoundedCornerShape(14.dp),
@@ -131,7 +143,36 @@ fun HdSecondaryButton(
             if (pressed && enabled) HdOrange else HdBlue.copy(alpha = 0.4f),
         ),
     ) {
-        Text(text, color = HdTextPrimary)
+        HdButtonContent(loading, loadingText ?: text, text)
+    }
+}
+
+@Composable
+private fun HdButtonContent(loading: Boolean, label: String, idleLabel: String) {
+    Row(horizontalArrangement = Arrangement.Center, verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+        if (loading) {
+            CircularProgressIndicator(
+                modifier = Modifier.size(18.dp),
+                strokeWidth = 2.dp,
+                color = HdOrange,
+            )
+            Spacer(Modifier.width(10.dp))
+        }
+        Text(if (loading) label else idleLabel, color = HdTextPrimary)
+    }
+}
+
+@Composable
+fun HdActionProgress(message: String?, modifier: Modifier = Modifier) {
+    if (message.isNullOrBlank()) return
+    Column(modifier.fillMaxWidth()) {
+        LinearProgressIndicator(
+            modifier = Modifier.fillMaxWidth(),
+            color = HdOrange,
+            trackColor = HdBlue.copy(alpha = 0.25f),
+        )
+        Text(message, color = HdOrange, modifier = Modifier.padding(top = 6.dp))
+        Spacer(Modifier.height(4.dp))
     }
 }
 
@@ -222,6 +263,7 @@ fun HdScaffold(
     actions: @Composable RowScope.() -> Unit = {},
     floating: @Composable () -> Unit = {},
     scroll: Boolean = true,
+    progressMessage: String? = null,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     androidx.compose.foundation.layout.Box(Modifier.fillMaxSize()) {
@@ -248,10 +290,9 @@ fun HdScaffold(
                 .padding(padding)
                 .padding(horizontal = 16.dp, vertical = 8.dp)
                 .imePadding()
-            if (scroll) {
-                Column(modifier.verticalScroll(rememberScrollState()), content = content)
-            } else {
-                Column(modifier.fillMaxSize(), content = content)
+            Column(if (scroll) modifier.verticalScroll(rememberScrollState()) else modifier.fillMaxSize()) {
+                HdActionProgress(progressMessage)
+                content()
             }
         }
     }

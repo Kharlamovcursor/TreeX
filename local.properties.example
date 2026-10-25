@@ -10,3 +10,5 @@ github.family.path=family/tree.json
 # Необязательно: ссылка и бот для обратной связи в Telegram
 telegram.feedback.url=https://t.me/Yakofffff
 telegram.feedback.bot=
+# Ссылка на профиль MAX из QR в приложении (https://max.ru/u/…). Если пусто — откроется «Поделиться в MAX».
+max.feedback.url=

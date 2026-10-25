@@ -35,19 +35,24 @@ class GitHubTreeSync(
         fetchRef(ref, missingIsNull = false) ?: throw IllegalStateException("Версия в Git не найдена")
 
     fun listCommits(): List<RemoteCommit> {
-        val url = "https://api.github.com/repos/$owner/$repo/commits?per_page=20" +
-            "&sha=${encode(branch)}&path=${encode(path.trim().trim('/'))}"
-        val (code, body) = request("GET", url, null)
-        if (code !in 200..299) throw IllegalStateException(githubMessage(code, body))
-        return json.parseToJsonElement(body).jsonArray.map { element ->
-            val item = element.jsonObject
-            val commit = item["commit"]?.jsonObject
-            RemoteCommit(
-                sha = item["sha"]?.jsonPrimitive?.content.orEmpty(),
-                message = commit?.get("message")?.jsonPrimitive?.content.orEmpty().lineSequence().firstOrNull().orEmpty(),
-                date = commit?.get("author")?.jsonObject?.get("date")?.jsonPrimitive?.content.orEmpty().take(16).replace('T', ' '),
-            )
-        }.filter { it.sha.isNotBlank() }
+        val filePath = commitsPathQueryValue(path)
+        val urls = buildList {
+            add(commitsListUrl(branch = branch, filePath = filePath))
+            if (filePath.isNotBlank()) add(commitsListUrl(branch = branch, filePath = null))
+            if (branch.isNotBlank()) add(commitsListUrl(branch = null, filePath = filePath))
+        }
+        for (url in urls.distinct()) {
+            val (code, body) = request("GET", url, null)
+            when {
+                code == 404 -> continue
+                code !in 200..299 -> throw IllegalStateException(githubMessage(code, body))
+                else -> {
+                    val parsed = parseCommits(body)
+                    if (parsed.isNotEmpty()) return parsed
+                }
+            }
+        }
+        return emptyList()
     }
 
     fun push(text: String, currentSha: String?, message: String): String {
@@ -92,6 +97,26 @@ class GitHubTreeSync(
     private fun encodedPath(): String =
         path.trim().trim('/').split('/').filter { it.isNotBlank() }.joinToString("/") { encode(it) }
 
+    private fun commitsListUrl(branch: String?, filePath: String?): String {
+        val query = buildList {
+            add("per_page=30")
+            if (!branch.isNullOrBlank()) add("sha=${encode(branch)}")
+            if (!filePath.isNullOrBlank()) add("path=$filePath")
+        }
+        return "https://api.github.com/repos/$owner/$repo/commits?${query.joinToString("&")}"
+    }
+
+    private fun parseCommits(body: String): List<RemoteCommit> =
+        json.parseToJsonElement(body).jsonArray.map { element ->
+            val item = element.jsonObject
+            val commit = item["commit"]?.jsonObject
+            RemoteCommit(
+                sha = item["sha"]?.jsonPrimitive?.content.orEmpty(),
+                message = commit?.get("message")?.jsonPrimitive?.content.orEmpty().lineSequence().firstOrNull().orEmpty(),
+                date = commit?.get("author")?.jsonObject?.get("date")?.jsonPrimitive?.content.orEmpty().take(16).replace('T', ' '),
+            )
+        }.filter { it.sha.isNotBlank() }
+
     private fun request(method: String, url: String, body: String?): Pair<Int, String> {
         val parsed = URL(url)
         require(parsed.protocol.equals("https", ignoreCase = true) && parsed.host.equals("api.github.com", true)) {
@@ -126,7 +151,9 @@ class GitHubTreeSync(
         return when (code) {
             401 -> "GitHub не принял токен. Нужен токен с правом contents."
             403 -> api ?: "GitHub запретил доступ. Репозиторий должен быть доступен этому токену."
-            404 -> "Репозиторий или файл не найден. Проверьте владельца, имя и доступ токена."
+            404 -> "Репозиторий или файл не найден ($owner/$repo, файл $path). " +
+                "Если файла ещё нет — откройте настройки и нажмите «Отправить в Git сейчас». " +
+                "Иначе проверьте токен (право contents) и доступ к репозиторию."
             409 -> "В Git уже есть другая версия. Сначала нажмите «Обновить информацию»."
             else -> api ?: "GitHub ответил HTTP $code"
         }
@@ -152,5 +179,11 @@ class GitHubTreeSync(
 
     companion object {
         private val SLUG = Regex("[A-Za-z0-9_.-]{1,80}")
+
+        /** Путь для query `path=` в API коммитов: слэши между папками, без %2F на весь путь. */
+        fun commitsPathQueryValue(filePath: String): String =
+            filePath.trim().trim('/').split('/').filter { it.isNotBlank() }.joinToString("/") { segment ->
+                URLEncoder.encode(segment, Charsets.UTF_8.name()).replace("+", "%20")
+            }
     }
 }

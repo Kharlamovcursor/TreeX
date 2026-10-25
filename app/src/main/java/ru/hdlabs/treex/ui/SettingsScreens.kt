@@ -2,9 +2,14 @@ package ru.hdlabs.treex.ui
 
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.Switch
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -14,6 +19,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -52,8 +58,52 @@ import ru.hdlabs.treex.update.ReleaseUpdateConfig
 import ru.hdlabs.treex.update.UpdateInfo
 import java.io.File
 
+private const val DEVELOPER_SETTINGS_PASSWORD = "86712"
+
 @Composable
 fun SettingsScreen(nav: NavHostController) {
+    val context = LocalContext.current
+    val app = context.applicationContext as TreeXApplication
+    val settings by app.container.settingsRepository.settings.collectAsStateWithLifecycle(AppSettings())
+    val scope = rememberCoroutineScope()
+
+    HdScaffold(title = "Настройки", onBack = { nav.popBackStack() }) {
+        HdCard {
+            Text("Оформление", color = HdTextPrimary, fontWeight = FontWeight.SemiBold)
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 10.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("Светлая тема", color = HdTextPrimary)
+                    Text(
+                        "Тёмный космический фон или светлый спокойный интерфейс.",
+                        color = HdTextSecondary,
+                        modifier = Modifier.padding(top = 4.dp),
+                    )
+                }
+                Switch(
+                    checked = settings.lightTheme,
+                    onCheckedChange = { light ->
+                        scope.launch {
+                            app.container.settingsRepository.update { it.copy(lightTheme = light) }
+                        }
+                    },
+                )
+            }
+        }
+        Spacer(Modifier.height(12.dp))
+        HdSecondaryButton("Справка по древу") { nav.navigate(Routes.TREE_HELP) }
+        Spacer(Modifier.height(12.dp))
+        HdSecondaryButton("Настройки разработчика") { nav.navigate(Routes.DEVELOPER_SETTINGS) }
+    }
+}
+
+@Composable
+fun DeveloperSettingsScreen(nav: NavHostController) {
     val context = LocalContext.current
     val app = context.applicationContext as TreeXApplication
     val repo = app.container.treeRepository
@@ -70,6 +120,13 @@ fun SettingsScreen(nav: NavHostController) {
     var botToken by remember { mutableStateOf("") }
     var chatId by remember { mutableStateOf("") }
     var hydrated by remember { mutableStateOf(false) }
+    var progress by remember { mutableStateOf<String?>(null) }
+    var gitPushLoading by remember { mutableStateOf(false) }
+    var telegramBackupLoading by remember { mutableStateOf(false) }
+    var gitSaveLoading by remember { mutableStateOf(false) }
+    var unlocked by remember { mutableStateOf(false) }
+    var gatePassword by remember { mutableStateOf("") }
+    var gateError by remember { mutableStateOf(false) }
 
     LaunchedEffect(settings) {
         if (!hydrated) {
@@ -87,18 +144,22 @@ fun SettingsScreen(nav: NavHostController) {
     val exportJson = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
         scope.launch {
+            progress = "Экспорт JSON…"
             try {
                 val text = TreeCodec.encode(repo.exportDocument())
                 context.contentResolver.openOutputStream(uri)?.use { it.write(text.toByteArray()) }
                 message = "JSON сохранён"
             } catch (e: Exception) {
                 message = e.message ?: "Не удалось экспортировать"
+            } finally {
+                progress = null
             }
         }
     }
     val exportZip = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/zip")) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
         scope.launch {
+            progress = "Сборка ZIP с фото…"
             try {
                 val file = File(context.cacheDir, "semya-hdlabs.zip")
                 val document = repo.exportDocument()
@@ -107,24 +168,30 @@ fun SettingsScreen(nav: NavHostController) {
                 message = "Архив с фото сохранён"
             } catch (e: Exception) {
                 message = e.message ?: "Не удалось собрать архив"
+            } finally {
+                progress = null
             }
         }
     }
     val exportGed = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/plain")) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
         scope.launch {
+            progress = "Экспорт GEDCOM…"
             try {
                 val text = repo.exportGedcom()
                 context.contentResolver.openOutputStream(uri)?.use { it.write(text.toByteArray()) }
                 message = "GEDCOM сохранён"
             } catch (e: Exception) {
                 message = e.message ?: "Не удалось экспортировать GEDCOM"
+            } finally {
+                progress = null
             }
         }
     }
     val importFile = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
         scope.launch {
+            progress = "Чтение файла…"
             try {
                 val bytes = withContext(Dispatchers.IO) {
                     context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
@@ -134,13 +201,48 @@ fun SettingsScreen(nav: NavHostController) {
                 preview = "Людей: ${document.people.size}, связей: ${document.unions.size}. Текущее древо будет заменено. Перед заменой сохранится локальная версия."
             } catch (e: Exception) {
                 message = e.message ?: "Не удалось прочитать файл"
+            } finally {
+                progress = null
             }
         }
     }
 
-    HdScaffold(title = "Настройки", onBack = { nav.popBackStack() }) {
-        HdSecondaryButton("Справка по древу") { nav.navigate(Routes.TREE_HELP) }
-        Spacer(Modifier.height(12.dp))
+    val gitOwner = settings.githubOwner.ifBlank { FamilyGitConfig.embeddedOwner }
+    val gitRepo = settings.githubRepo.ifBlank { FamilyGitConfig.embeddedRepo }
+    val gitBranch = settings.githubBranch.ifBlank { FamilyGitConfig.embeddedBranch }
+    val gitPath = settings.githubPath.ifBlank { FamilyGitConfig.embeddedPath }
+
+    HdScaffold(title = "Настройки разработчика", onBack = { nav.popBackStack() }, progressMessage = progress) {
+        if (!unlocked) {
+            HdCard {
+                Text("Доступ", color = HdTextPrimary, fontWeight = FontWeight.SemiBold)
+                Text(
+                    "Служебные функции: экспорт, Git, бэкапы и обновления.",
+                    color = HdTextSecondary,
+                    modifier = Modifier.padding(top = 6.dp, bottom = 8.dp),
+                )
+                HdTextField(
+                    gatePassword,
+                    { gatePassword = it; gateError = false },
+                    "Пароль",
+                    keyboardType = KeyboardType.Number,
+                    visualTransformation = PasswordVisualTransformation(),
+                )
+                if (gateError) {
+                    Text("Неверный пароль", color = HdOrange, modifier = Modifier.padding(top = 8.dp))
+                }
+                Spacer(Modifier.height(8.dp))
+                HdPrimaryButton("Войти") {
+                    if (gatePassword == DEVELOPER_SETTINGS_PASSWORD) {
+                        unlocked = true
+                        gateError = false
+                    } else {
+                        gateError = true
+                    }
+                }
+            }
+            return@HdScaffold
+        }
         HdCard {
             Text("Формат древа", color = HdTextPrimary, fontWeight = FontWeight.SemiBold)
             Text(
@@ -170,8 +272,13 @@ fun SettingsScreen(nav: NavHostController) {
                     modifier = Modifier.padding(top = 6.dp, bottom = 8.dp),
                 )
                 Text(
-                    "${settings.githubOwner}/${settings.githubRepo}, ветка ${settings.githubBranch}, файл ${settings.githubPath}",
+                    "$gitOwner/$gitRepo, ветка $gitBranch, файл $gitPath",
                     color = HdOrange,
+                    modifier = Modifier.padding(bottom = 8.dp),
+                )
+                Text(
+                    "Если Git пишет «не найден» — сначала нажмите «Отправить в Git сейчас», чтобы создать файл в репозитории.",
+                    color = HdTextSecondary,
                     modifier = Modifier.padding(bottom = 8.dp),
                 )
             } else {
@@ -186,30 +293,51 @@ fun SettingsScreen(nav: NavHostController) {
                 HdTextField(branch, { branch = it }, "Ветка")
                 HdTextField(path, { path = it }, "Путь к файлу")
                 Spacer(Modifier.height(8.dp))
-                HdPrimaryButton("Сохранить Git") {
+                HdPrimaryButton(
+                    "Сохранить Git",
+                    loading = gitSaveLoading,
+                    loadingText = "Сохранение…",
+                ) {
                     scope.launch {
-                        app.container.settingsRepository.update {
-                            it.copy(
-                                githubToken = token,
-                                githubOwner = owner,
-                                githubRepo = repoName,
-                                githubBranch = branch,
-                                githubPath = path,
-                            )
+                        gitSaveLoading = true
+                        progress = "Сохранение настроек Git…"
+                        try {
+                            app.container.settingsRepository.update {
+                                it.copy(
+                                    githubToken = token,
+                                    githubOwner = owner,
+                                    githubRepo = repoName,
+                                    githubBranch = branch,
+                                    githubPath = path,
+                                )
+                            }
+                            message = "Настройки Git сохранены"
+                        } finally {
+                            gitSaveLoading = false
+                            progress = null
                         }
-                        message = "Настройки Git сохранены"
                     }
                 }
             }
             Spacer(Modifier.height(8.dp))
-            HdSecondaryButton("Отправить в Git сейчас") {
+            HdSecondaryButton(
+                "Отправить в Git сейчас",
+                loading = gitPushLoading,
+                loadingText = "Отправка в Git…",
+                enabled = settings.gitConfigured,
+            ) {
                 scope.launch {
+                    gitPushLoading = true
+                    progress = "Отправка древа в Git…"
                     try {
                         message = repo.pushNow()
                     } catch (e: CancellationException) {
                         throw e
                     } catch (e: Exception) {
                         message = e.message ?: "Не удалось отправить в Git"
+                    } finally {
+                        gitPushLoading = false
+                        progress = null
                     }
                 }
             }
@@ -234,14 +362,21 @@ fun SettingsScreen(nav: NavHostController) {
                 }
             }
             Spacer(Modifier.height(8.dp))
-            HdSecondaryButton("Отправить бэкап в Telegram") {
+            HdSecondaryButton(
+                "Отправить бэкап в Telegram",
+                loading = telegramBackupLoading,
+                loadingText = "Подготовка бэкапа…",
+            ) {
                 scope.launch {
+                    telegramBackupLoading = true
+                    progress = "Подготовка бэкапа для Telegram…"
                     try {
                         val document = repo.exportDocument()
                         val file = File(context.cacheDir, "semya-hdlabs-backup.zip")
                         withContext(Dispatchers.IO) { BackupZip.write(context, document, file) }
                         val current = settings
                         if (current.telegramBotConfigured) {
+                            progress = "Отправка в Telegram…"
                             withContext(Dispatchers.IO) {
                                 TelegramBackup.sendToBot(
                                     current.telegramBotToken,
@@ -259,6 +394,9 @@ fun SettingsScreen(nav: NavHostController) {
                         throw e
                     } catch (e: Exception) {
                         message = e.message ?: "Не удалось отправить бэкап"
+                    } finally {
+                        telegramBackupLoading = false
+                        progress = null
                     }
                 }
             }
@@ -269,7 +407,9 @@ fun SettingsScreen(nav: NavHostController) {
             color = HdTextSecondary,
             modifier = Modifier.padding(bottom = 8.dp),
         )
-        UpdateSection()
+        UpdateSection(
+            onProgress = { progress = it },
+        )
         Spacer(Modifier.height(16.dp))
         Text("Связь с разработчиком", color = HdTextPrimary, fontWeight = FontWeight.SemiBold)
         Text(
@@ -300,11 +440,14 @@ fun SettingsScreen(nav: NavHostController) {
                     pendingImport = null
                     if (bytes != null) {
                         scope.launch {
+                            progress = "Импорт древа…"
                             try {
                                 repo.importBytes(bytes)
                                 message = "Импорт выполнен"
                             } catch (e: Exception) {
                                 message = e.message ?: "Не удалось импортировать"
+                            } finally {
+                                progress = null
                             }
                         }
                     }
@@ -327,9 +470,11 @@ fun HistoryScreen(nav: NavHostController) {
     var message by remember { mutableStateOf("") }
     var pendingSnapshot by remember { mutableStateOf<SnapshotInfo?>(null) }
     var pendingCommit by remember { mutableStateOf<GitHubTreeSync.RemoteCommit?>(null) }
+    var progress by remember { mutableStateOf<String?>(null) }
+    var gitLoading by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) { snapshots = repo.snapshots() }
 
-    HdScaffold(title = "История", onBack = { nav.popBackStack() }) {
+    HdScaffold(title = "История", onBack = { nav.popBackStack() }, progressMessage = progress) {
         Text("Локальные снимки", color = HdTextPrimary, fontWeight = FontWeight.SemiBold)
         Text("Снимок делается перед правкой, импортом и удалением. Хранятся последние 30.", color = HdTextSecondary, modifier = Modifier.padding(bottom = 8.dp))
         if (snapshots.isEmpty()) Text("Снимков пока нет", color = HdTextSecondary)
@@ -338,15 +483,24 @@ fun HistoryScreen(nav: NavHostController) {
             Spacer(Modifier.height(8.dp))
         }
         Spacer(Modifier.height(8.dp))
-        HdSecondaryButton("Показать версии Git") {
+        HdSecondaryButton(
+            "Показать версии Git",
+            loading = gitLoading,
+            loadingText = "Чтение Git…",
+        ) {
             scope.launch {
+                gitLoading = true
+                progress = "Чтение версий в Git…"
                 try {
                     commits = repo.remoteCommits()
-                    if (commits.isEmpty()) message = "В Git пока нет версий"
+                    message = ""
                 } catch (e: CancellationException) {
                     throw e
                 } catch (e: Exception) {
                     message = e.message ?: "Не удалось прочитать Git"
+                } finally {
+                    gitLoading = false
+                    progress = null
                 }
             }
         }
@@ -404,7 +558,7 @@ fun HistoryScreen(nav: NavHostController) {
 }
 
 @Composable
-private fun UpdateSection() {
+private fun UpdateSection(onProgress: (String?) -> Unit) {
     val context = LocalContext.current
     val app = context.applicationContext as TreeXApplication
     val scope = rememberCoroutineScope()
@@ -415,6 +569,7 @@ private fun UpdateSection() {
     fun download(info: UpdateInfo) {
         scope.launch {
             checking = true
+            onProgress("Загрузка обновления…")
             try {
                 val file = withContext(Dispatchers.IO) {
                     val target = File(context.cacheDir, info.apkFileName)
@@ -428,13 +583,20 @@ private fun UpdateSection() {
                 message = e.message ?: "Не удалось скачать обновление"
             } finally {
                 checking = false
+                onProgress(null)
             }
         }
     }
 
-    HdSecondaryButton(if (checking) "Проверка…" else "Обновить приложение", enabled = !checking) {
+    HdSecondaryButton(
+        "Обновить приложение",
+        enabled = !checking,
+        loading = checking,
+        loadingText = "Проверка обновлений…",
+    ) {
         scope.launch {
             checking = true
+            onProgress("Проверка обновлений…")
             try {
                 if (!ReleaseUpdateConfig.isConfigured()) {
                     message = "Репозиторий обновлений не настроен"
@@ -451,6 +613,7 @@ private fun UpdateSection() {
                 message = e.message ?: "Не удалось проверить обновления"
             } finally {
                 checking = false
+                onProgress(null)
             }
         }
     }
