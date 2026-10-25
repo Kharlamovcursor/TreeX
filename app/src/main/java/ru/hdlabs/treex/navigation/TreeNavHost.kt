@@ -46,6 +46,8 @@ import ru.hdlabs.treex.update.ApkDownloadHelper
 import ru.hdlabs.treex.update.InstallHelper
 import ru.hdlabs.treex.update.ReleaseUpdateConfig
 import ru.hdlabs.treex.update.UpdateInfo
+import ru.hdlabs.treex.diagnostic.AppEventLog
+import ru.hdlabs.treex.util.NetworkHelper
 import java.io.File
 
 object Routes {
@@ -71,22 +73,39 @@ fun TreeNavHost() {
     var pendingGit by remember { mutableStateOf<RemoteRefresh?>(null) }
     var gitNotice by remember { mutableStateOf<String?>(null) }
     var updateError by remember { mutableStateOf<String?>(null) }
+    var updateDownloading by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
-        delay(5_000)
         launch {
-            if (!ReleaseUpdateConfig.isConfigured()) return@launch
-            val info = runCatching {
-                withContext(Dispatchers.IO) {
-                    app.container.updateSource(ReleaseUpdateConfig.githubOwner, ReleaseUpdateConfig.githubRepo)
-                        .checkForUpdate(BuildConfig.VERSION_CODE)
+            repeat(4) { attempt ->
+                if (attempt > 0) delay(2_500L)
+                if (!ReleaseUpdateConfig.isConfigured()) return@launch
+                if (!NetworkHelper.isOnline(context) && attempt < 3) return@repeat
+                val info = runCatching {
+                    withContext(Dispatchers.IO) {
+                        app.container.updateSource(ReleaseUpdateConfig.githubOwner, ReleaseUpdateConfig.githubRepo)
+                            .checkForUpdate(BuildConfig.VERSION_CODE)
+                    }
+                }.getOrNull()
+                if (info != null) {
+                    AppEventLog.info("update", "Доступна версия ${info.versionName}")
+                    pendingUpdate = info
+                    return@launch
                 }
-            }.getOrNull()
-            if (info != null) pendingUpdate = info
+            }
         }
         launch {
-            when (val git = runCatching { app.container.treeRepository.inspectGit() }.getOrNull()) {
-                is RemoteRefresh.Incoming, is RemoteRefresh.Diverged -> pendingGit = git
+            when (val git = app.container.treeRepository.pullFromGitOnLaunch()) {
+                is RemoteRefresh.Diverged -> pendingGit = git
+                is RemoteRefresh.Updated -> {
+                    AppEventLog.info("git", "Автообновление при запуске: ${git.count} чел.")
+                    gitNotice = "Древо обновлено из Git: ${git.count} чел."
+                }
+                is RemoteRefresh.Failed -> {
+                    if (!NetworkHelper.looksLikeNetworkIssue(git.message)) {
+                        gitNotice = git.message
+                    }
+                }
                 else -> Unit
             }
         }
@@ -172,18 +191,25 @@ fun TreeNavHost() {
                 )
             },
             confirmButton = {
-                HdPrimaryButton("Обновить") {
-                    pendingUpdate = null
+                HdPrimaryButton(
+                    if (updateDownloading) "Загрузка…" else "Обновить",
+                    enabled = !updateDownloading,
+                ) {
                     scope.launch {
+                        updateDownloading = true
                         try {
                             val file = withContext(Dispatchers.IO) {
                                 val target = File(context.cacheDir, info.apkFileName)
                                 ApkDownloadHelper.download(info.apkUrl, target)
                                 target
                             }
+                            pendingUpdate = null
                             InstallHelper.promptInstall(context, file)
                         } catch (e: Exception) {
-                            updateError = e.message ?: "Не удалось скачать обновление"
+                            updateError = NetworkHelper.toUserMessage(e)
+                                ?: (e.message ?: "Не удалось скачать обновление")
+                        } finally {
+                            updateDownloading = false
                         }
                     }
                 }

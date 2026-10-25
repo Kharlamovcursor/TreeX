@@ -4,6 +4,7 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import ru.hdlabs.treex.update.InstallHelper
 import androidx.compose.runtime.getValue
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import ru.hdlabs.treex.data.settings.AppSettings
@@ -21,5 +22,10 @@ class MainActivity : ComponentActivity() {
                 TreeNavHost()
             }
         }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        InstallHelper.resumePendingInstall(this)
     }
 }

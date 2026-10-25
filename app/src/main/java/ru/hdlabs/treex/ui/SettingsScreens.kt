@@ -38,6 +38,9 @@ import ru.hdlabs.treex.backup.BackupZip
 import ru.hdlabs.treex.backup.TreeCodec
 import ru.hdlabs.treex.data.SnapshotInfo
 import ru.hdlabs.treex.data.settings.AppSettings
+import ru.hdlabs.treex.diagnostic.AppEventLog
+import ru.hdlabs.treex.diagnostic.DiagnosticReport
+import ru.hdlabs.treex.diagnostic.DiagnosticShare
 import ru.hdlabs.treex.feedback.MaxFeedback
 import ru.hdlabs.treex.feedback.TelegramFeedback
 import ru.hdlabs.treex.sync.FamilyGitConfig
@@ -56,6 +59,7 @@ import ru.hdlabs.treex.update.ApkDownloadHelper
 import ru.hdlabs.treex.update.InstallHelper
 import ru.hdlabs.treex.update.ReleaseUpdateConfig
 import ru.hdlabs.treex.update.UpdateInfo
+import ru.hdlabs.treex.util.NetworkHelper
 import java.io.File
 
 private const val DEVELOPER_SETTINGS_PASSWORD = "86712"
@@ -66,8 +70,11 @@ fun SettingsScreen(nav: NavHostController) {
     val app = context.applicationContext as TreeXApplication
     val settings by app.container.settingsRepository.settings.collectAsStateWithLifecycle(AppSettings())
     val scope = rememberCoroutineScope()
+    var progress by remember { mutableStateOf<String?>(null) }
+    var reportMessage by remember { mutableStateOf<String?>(null) }
+    var reportLoading by remember { mutableStateOf(false) }
 
-    HdScaffold(title = "Настройки", onBack = { nav.popBackStack() }) {
+    HdScaffold(title = "Настройки", onBack = { nav.popBackStack() }, progressMessage = progress) {
         HdCard {
             Text("Оформление", color = HdTextPrimary, fontWeight = FontWeight.SemiBold)
             Row(
@@ -96,9 +103,61 @@ fun SettingsScreen(nav: NavHostController) {
             }
         }
         Spacer(Modifier.height(12.dp))
+        HdCard {
+            Text("Приложение", color = HdTextPrimary, fontWeight = FontWeight.SemiBold)
+            Text(
+                "Версия ${BuildConfig.VERSION_NAME}",
+                color = HdTextSecondary,
+                modifier = Modifier.padding(top = 6.dp, bottom = 8.dp),
+            )
+            Text(
+                "Обновление ставится поверх текущей версии: древо, фото и история сохраняются. Не удаляйте приложение перед обновлением.",
+                color = HdTextSecondary,
+                modifier = Modifier.padding(bottom = 8.dp),
+            )
+            UpdateSection(onProgress = { progress = it })
+            Spacer(Modifier.height(8.dp))
+            HdSecondaryButton(
+                "Отправить отчёт о проблеме",
+                loading = reportLoading,
+                loadingText = "Сбор отчёта…",
+            ) {
+                scope.launch {
+                    reportLoading = true
+                    progress = "Подготовка отчёта…"
+                    try {
+                        val text = DiagnosticReport.buildText(context)
+                        val file = File(context.cacheDir, "treex-diagnostic.txt")
+                        withContext(Dispatchers.IO) { file.writeText(text) }
+                        AppEventLog.info("report", "Пользователь отправил диагностический отчёт")
+                        DiagnosticShare.share(context, file)
+                    } catch (e: Exception) {
+                        reportMessage = e.message ?: "Не удалось собрать отчёт"
+                    } finally {
+                        reportLoading = false
+                        progress = null
+                    }
+                }
+            }
+            Text(
+                "Файл с версией приложения и последними ошибками (без древа и паролей). Отправьте в Telegram или MAX.",
+                color = HdTextSecondary,
+                modifier = Modifier.padding(top = 6.dp),
+            )
+        }
+        Spacer(Modifier.height(12.dp))
         HdSecondaryButton("Справка по древу") { nav.navigate(Routes.TREE_HELP) }
         Spacer(Modifier.height(12.dp))
         HdSecondaryButton("Настройки разработчика") { nav.navigate(Routes.DEVELOPER_SETTINGS) }
+    }
+
+    reportMessage?.let { text ->
+        AlertDialog(
+            onDismissRequest = { reportMessage = null },
+            title = { Text("Отчёт") },
+            text = { Text(text, color = HdTextSecondary) },
+            confirmButton = { HdPrimaryButton("Понятно") { reportMessage = null } },
+        )
     }
 }
 
@@ -402,15 +461,6 @@ fun DeveloperSettingsScreen(nav: NavHostController) {
             }
         }
         Spacer(Modifier.height(16.dp))
-        Text(
-            "Обновление приложения ставится поверх текущей версии и не удаляет древо, фото и историю. Не удаляйте приложение перед обновлением.",
-            color = HdTextSecondary,
-            modifier = Modifier.padding(bottom = 8.dp),
-        )
-        UpdateSection(
-            onProgress = { progress = it },
-        )
-        Spacer(Modifier.height(16.dp))
         Text("Связь с разработчиком", color = HdTextPrimary, fontWeight = FontWeight.SemiBold)
         Text(
             "Telegram @Yakofffff или мессенджер MAX, Yakoff.",
@@ -580,7 +630,7 @@ private fun UpdateSection(onProgress: (String?) -> Unit) {
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                message = e.message ?: "Не удалось скачать обновление"
+                message = NetworkHelper.toUserMessage(e) ?: (e.message ?: "Не удалось скачать обновление")
             } finally {
                 checking = false
                 onProgress(null)
@@ -610,7 +660,7 @@ private fun UpdateSection(onProgress: (String?) -> Unit) {
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                message = e.message ?: "Не удалось проверить обновления"
+                message = NetworkHelper.toUserMessage(e) ?: (e.message ?: "Не удалось проверить обновления")
             } finally {
                 checking = false
                 onProgress(null)

@@ -57,6 +57,7 @@ import ru.hdlabs.treex.TreeXApplication
 import ru.hdlabs.treex.data.PhotoStore
 import ru.hdlabs.treex.data.TreeState
 import ru.hdlabs.treex.data.local.PersonEntity
+import ru.hdlabs.treex.domain.acceptsAsParent
 import ru.hdlabs.treex.domain.acceptsAsSpouse
 import ru.hdlabs.treex.domain.addSpouseLabel
 import ru.hdlabs.treex.domain.RelativeAttach
@@ -68,6 +69,8 @@ import ru.hdlabs.treex.domain.lifeLine
 import ru.hdlabs.treex.domain.parseSpouseDrafts
 import ru.hdlabs.treex.domain.spouseDraftsOf
 import ru.hdlabs.treex.domain.spouseIdsOf
+import ru.hdlabs.treex.domain.halfSiblingCaption
+import ru.hdlabs.treex.domain.siblingGroupsOf
 import ru.hdlabs.treex.domain.spouseNoun
 import ru.hdlabs.treex.domain.suggestPatronymic
 import ru.hdlabs.treex.navigation.Routes
@@ -471,7 +474,12 @@ fun PersonEditorScreen(routeId: String, role: String, anchor: String, nav: NavHo
             }
         }
         val candidates = tree.people.filter { person ->
-            person.id !in exclude && (which != Picker.Spouse || acceptsAsSpouse(gender, person.gender))
+            person.id !in exclude &&
+                when (which) {
+                    Picker.Father -> acceptsAsParent("father", person)
+                    Picker.Mother -> acceptsAsParent("mother", person)
+                    Picker.Spouse -> acceptsAsSpouse(gender, person.gender)
+                }
         }
         PersonPickDialog(
             title = when (which) {
@@ -480,10 +488,14 @@ fun PersonEditorScreen(routeId: String, role: String, anchor: String, nav: NavHo
                 Picker.Spouse -> spouseNoun(gender)
             },
             people = candidates,
-            emptyText = if (which == Picker.Spouse && tree.people.any { it.id !in exclude }) {
-                "Нет людей противоположного пола"
-            } else {
-                "Сначала добавьте других людей"
+            emptyText = when (which) {
+                Picker.Father -> "Нет мужских карточек — создайте или укажите пол «мужской»."
+                Picker.Mother -> "Нет женских карточек — создайте или укажите пол «женский»."
+                Picker.Spouse -> if (tree.people.any { it.id !in exclude }) {
+                    "Нет людей противоположного пола"
+                } else {
+                    "Сначала добавьте других людей"
+                }
             },
             onDismiss = { picker = null },
             onPick = { id ->
@@ -522,6 +534,7 @@ fun PersonDetailScreen(personId: String, nav: NavHostController) {
     }
     val spouses = spouseIdsOf(tree.unions, person.id).mapNotNull { id -> tree.people.find { it.id == id } }
     val children = tree.people.filter { it.fatherId == person.id || it.motherId == person.id }
+    val siblings = siblingGroupsOf(person, tree.people)
     if (person.isVacantSlot()) {
         HdScaffold(title = "Пустое место", onBack = { nav.popBackStack() }) {
             Text("Здесь была карточка. Древо и связи сохранены.", color = HdTextSecondary)
@@ -585,6 +598,23 @@ fun PersonDetailScreen(personId: String, nav: NavHostController) {
             }
             if (children.isEmpty()) Text("Детей в древе нет", color = HdTextSecondary, modifier = Modifier.padding(top = 6.dp))
             else children.forEach { LinkLine("Ребёнок", it, nav) }
+            if (siblings.full.isNotEmpty()) {
+                Spacer(Modifier.height(8.dp))
+                Text("Братья и сёстры", color = HdTextPrimary, fontWeight = FontWeight.SemiBold)
+                siblings.full.forEach { LinkLine("Брат / сестра", it, nav) }
+            }
+            if (siblings.half.isNotEmpty()) {
+                Spacer(Modifier.height(8.dp))
+                Text("Сводные братья и сёстры", color = HdTextPrimary, fontWeight = FontWeight.SemiBold)
+                siblings.half.forEach { half ->
+                    LinkLine(
+                        "Сводный родственник",
+                        half,
+                        nav,
+                        ", ${halfSiblingCaption(person, half)}",
+                    )
+                }
+            }
             if (person.notes.isNotBlank()) {
                 Spacer(Modifier.height(8.dp))
                 Text(person.notes, color = HdTextPrimary)

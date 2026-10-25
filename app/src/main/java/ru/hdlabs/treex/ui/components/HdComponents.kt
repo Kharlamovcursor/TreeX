@@ -1,6 +1,10 @@
 package ru.hdlabs.treex.ui.components
 
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
@@ -45,8 +49,15 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.foundation.text.KeyboardOptions
@@ -255,10 +266,46 @@ fun HdTextField(
     )
 }
 
+@Composable
+fun HdLabsBrandTitle(modifier: Modifier = Modifier) {
+    val transition = rememberInfiniteTransition(label = "hdBrandTitle")
+    val travel by transition.animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(animation = tween(4200, easing = LinearEasing)),
+        label = "travel",
+    )
+    val width = 520f
+    val start = travel * width - width * 0.35f
+    val brush = Brush.linearGradient(
+        colors = listOf(
+            HdBlue,
+            Color(0xFF7DD3FC),
+            HdOrange,
+            Color(0xFFFFE0B2),
+            HdBlue,
+        ),
+        start = Offset(start, 0f),
+        end = Offset(start + width * 0.55f, 0f),
+    )
+    Text(
+        text = "Древо by HDLabs",
+        modifier = modifier.semantics { contentDescription = "Древо by HDLabs" },
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+        style = TextStyle(
+            fontSize = 20.sp,
+            fontWeight = FontWeight.Bold,
+            brush = brush,
+        ),
+    )
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun HdScaffold(
     title: String,
+    titleContent: (@Composable () -> Unit)? = null,
     onBack: (() -> Unit)? = null,
     actions: @Composable RowScope.() -> Unit = {},
     floating: @Composable () -> Unit = {},
@@ -273,7 +320,13 @@ fun HdScaffold(
             floatingActionButton = floating,
             topBar = {
                 TopAppBar(
-                    title = { Text(title, color = HdTextPrimary) },
+                    title = {
+                        if (titleContent != null) {
+                            titleContent()
+                        } else {
+                            Text(title, color = HdTextPrimary)
+                        }
+                    },
                     navigationIcon = {
                         if (onBack != null) {
                             IconButton(onClick = onBack) {

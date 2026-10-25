@@ -40,7 +40,10 @@ import ru.hdlabs.treex.domain.TreeRules
 import ru.hdlabs.treex.domain.mergePerson
 import ru.hdlabs.treex.domain.mergeSpouseDrafts
 import ru.hdlabs.treex.domain.spouseDraftsOf
+import ru.hdlabs.treex.domain.acceptsAsParent
 import ru.hdlabs.treex.sync.GitHubTreeSync
+import ru.hdlabs.treex.diagnostic.AppEventLog
+import ru.hdlabs.treex.util.NetworkHelper
 import ru.hdlabs.treex.sync.GitRelation
 import ru.hdlabs.treex.sync.relateGit
 import java.io.File
@@ -274,6 +277,15 @@ class TreeRepository(
                 val link = openLinksState.value.find { it.id == linkId } ?: return@withTransaction
                 val people = peopleDao.all()
                 val target = people.find { it.id == targetId } ?: return@withTransaction
+                if (link.slot in setOf("father", "mother") && !acceptsAsParent(link.slot, target)) {
+                    throw IllegalStateException(
+                        if (link.slot == "father") {
+                            "Для отца можно выбрать только мужскую карточку."
+                        } else {
+                            "Для матери можно выбрать только женскую карточку."
+                        },
+                    )
+                }
                 val vacant = target.vacant
                 val vacantFill = if (link.slot == "vacancy" && vacant && targetId == link.ownerId) {
                     true
@@ -387,6 +399,33 @@ class TreeRepository(
         schedulePush()
     }
 
+    suspend fun pullFromGitOnLaunch(): RemoteRefresh? {
+        val settings = settingsRepository.settings.first()
+        if (!settings.gitConfigured) return null
+        repeat(5) { attempt ->
+            if (!NetworkHelper.isOnline(context)) {
+                delay(1_500L * (attempt + 1))
+                return@repeat
+            }
+            when (val status = inspectGit()) {
+                is RemoteRefresh.Incoming -> {
+                    AppEventLog.info("git", "При запуске найдена новая версия в Git")
+                    return refreshFromGit()
+                }
+                is RemoteRefresh.Diverged -> return status
+                is RemoteRefresh.Failed -> {
+                    if (NetworkHelper.looksLikeNetworkIssue(status.message) && attempt < 4) {
+                        delay(2_000L)
+                        return@repeat
+                    }
+                    return status
+                }
+                else -> return status
+            }
+        }
+        return null
+    }
+
     suspend fun inspectGit(): RemoteRefresh {
         val look = lookAtGit() ?: return RemoteRefresh.NotConfigured
         return look.fold(
@@ -416,7 +455,9 @@ class TreeRepository(
             },
             onFailure = { error ->
                 if (error is kotlinx.coroutines.CancellationException) throw error
-                RemoteRefresh.Failed(error.message ?: "Не удалось получить данные из Git")
+                val message = NetworkHelper.toUserMessage(error) ?: "Не удалось получить данные из Git"
+                AppEventLog.error("git", message, error)
+                RemoteRefresh.Failed(message)
             },
         )
     }
@@ -439,12 +480,15 @@ class TreeRepository(
                         generation += 1
                     }
                     writeMarker(remote.sha, TreeCodec.contentHash(remoteDoc))
+                    AppEventLog.info("git", "Древо загружено из Git: ${remoteDoc.people.size} чел.")
                     RemoteRefresh.Updated(remoteDoc.people.size)
                 }
             },
             onFailure = { error ->
                 if (error is kotlinx.coroutines.CancellationException) throw error
-                RemoteRefresh.Failed(error.message ?: "Не удалось получить данные из Git")
+                val message = NetworkHelper.toUserMessage(error) ?: "Не удалось получить данные из Git"
+                AppEventLog.error("git", message, error)
+                RemoteRefresh.Failed(message)
             },
         )
     }
@@ -510,7 +554,9 @@ class TreeRepository(
                 .onSuccess { syncNoteState.value = null }
                 .onFailure { error ->
                     if (error is kotlinx.coroutines.CancellationException) throw error
-                    syncNoteState.value = error.message
+                    val message = NetworkHelper.toUserMessage(error)
+                    if (message != null) AppEventLog.error("git", message, error)
+                    syncNoteState.value = message
                 }
         }
     }

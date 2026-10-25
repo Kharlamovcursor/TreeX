@@ -178,8 +178,18 @@ object TreeLayout {
             val memberSet = members.toSet()
             val nextStack = stack + memberSet
             val natural = people.filter { child ->
+                if (child.id in nextStack) return@filter false
                 val parents = parentsOf(child)
-                child.id !in nextStack && parents.isNotEmpty() && parents.all { it in memberSet }
+                if (parents.isEmpty()) return@filter false
+                when {
+                    parents.all { it in memberSet } -> true
+                    parents.size == 1 -> parents[0] in memberSet
+                    else -> {
+                        val fatherIn = child.fatherId in memberSet
+                        val motherIn = child.motherId in memberSet
+                        fatherIn && !motherIn || motherIn && !fatherIn
+                    }
+                }
             }
             val bridged = openLinks.filter { it.slot == "bridge" && it.anchorId in memberSet }
                 .flatMap { it.childIds }

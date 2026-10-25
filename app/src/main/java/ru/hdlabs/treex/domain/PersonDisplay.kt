@@ -4,6 +4,7 @@ import ru.hdlabs.treex.data.local.PersonEntity
 import ru.hdlabs.treex.data.local.UnionEntity
 import java.time.LocalDate
 import java.time.Period
+import java.time.format.DateTimeFormatter
 import java.time.format.DateTimeParseException
 
 fun PersonEntity.isVacantSlot(): Boolean = vacant
@@ -27,14 +28,28 @@ fun PersonEntity.initials(): String {
 }
 
 fun PersonEntity.yearsLabel(): String {
-    val birth = yearOf(birthDate)
-    val death = yearOf(deathDate)
+    val birth = formatCardDate(birthDate)
+    val death = formatCardDate(deathDate)
     return when {
         birth != null && death != null -> "$birth — $death"
-        birth != null -> "р. $birth"
-        death != null -> "ум. $death"
+        birth != null -> birth
+        death != null -> death
         else -> ""
     }
+}
+
+fun formatCardDate(value: String): String? {
+    val trimmed = value.trim()
+    if (trimmed.isBlank()) return null
+    parseIsoDate(trimmed)?.let { return it.format(CARD_DATE) }
+    val year = yearOf(trimmed)
+    return year?.let { "р. $it" }
+}
+
+fun acceptsAsParent(slot: String, candidate: PersonEntity): Boolean = when (slot) {
+    "father" -> candidate.vacant || candidate.gender == "m"
+    "mother" -> candidate.vacant || candidate.gender == "f"
+    else -> true
 }
 
 fun PersonEntity.lifeLine(today: LocalDate = LocalDate.now()): String {
@@ -95,6 +110,8 @@ private fun ageWord(years: Int): String {
         else -> "лет"
     }
 }
+
+private val CARD_DATE: DateTimeFormatter = DateTimeFormatter.ofPattern("dd.MM.yyyy")
 
 private fun parseIsoDate(value: String): LocalDate? = try {
     val match = Regex("""^(\d{4})-(\d{2})-(\d{2})""").find(value.trim()) ?: return null

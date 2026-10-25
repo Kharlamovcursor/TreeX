@@ -66,6 +66,7 @@ import ru.hdlabs.treex.domain.fullName
 import ru.hdlabs.treex.domain.isVacantSlot
 import ru.hdlabs.treex.domain.lifeLine
 import ru.hdlabs.treex.domain.matchesQuery
+import ru.hdlabs.treex.domain.acceptsAsParent
 import ru.hdlabs.treex.domain.addSpouseLabel
 import ru.hdlabs.treex.domain.OpenLink
 import ru.hdlabs.treex.domain.describeOpenLink
@@ -74,6 +75,7 @@ import ru.hdlabs.treex.feedback.TelegramFeedback
 import ru.hdlabs.treex.navigation.Routes
 import ru.hdlabs.treex.ui.components.HdCard
 import ru.hdlabs.treex.ui.components.HdPrimaryButton
+import ru.hdlabs.treex.ui.components.HdLabsBrandTitle
 import ru.hdlabs.treex.ui.components.HdScaffold
 import ru.hdlabs.treex.ui.components.HdSecondaryButton
 import ru.hdlabs.treex.ui.components.HdTextField
@@ -138,7 +140,8 @@ fun TreeScreen(nav: NavHostController, highlight: String) {
     }
 
     HdScaffold(
-        title = "Древо",
+        title = "Древо by HDLabs",
+        titleContent = { HdLabsBrandTitle() },
         scroll = false,
         progressMessage = if (refreshing) "Обновление из Git…" else null,
         actions = {
@@ -232,8 +235,23 @@ fun TreeScreen(nav: NavHostController, highlight: String) {
                         onSelect = { person ->
                             val linkId = pendingLinkId
                             if (linkId != null) {
+                                val link = openLinks.find { it.id == linkId }
+                                if (link != null && link.slot in setOf("father", "mother") && !acceptsAsParent(link.slot, person)) {
+                                    updatedMessage = if (link.slot == "father") {
+                                        "Для отца выберите мужскую карточку."
+                                    } else {
+                                        "Для матери выберите женскую карточку."
+                                    }
+                                    return@FamilyTree
+                                }
                                 pendingLinkId = null
-                                scope.launch { app.container.treeRepository.attachOpenLink(linkId, person.id) }
+                                scope.launch {
+                                    runCatching {
+                                        app.container.treeRepository.attachOpenLink(linkId, person.id)
+                                    }.onFailure { error ->
+                                        updatedMessage = error.message ?: "Не удалось прикрепить связь"
+                                    }
+                                }
                                 if (person.isVacantSlot()) {
                                     nav.navigate(Routes.edit(person.id))
                                 }
