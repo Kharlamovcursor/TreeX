@@ -50,6 +50,7 @@ import ru.hdlabs.treex.sync.GitHubTreeSync
 import ru.hdlabs.treex.diagnostic.AppEventLog
 import ru.hdlabs.treex.util.NetworkHelper
 import ru.hdlabs.treex.sync.GitRelation
+import ru.hdlabs.treex.sync.inspectGitRefresh
 import ru.hdlabs.treex.sync.relateGit
 import java.io.File
 import java.time.Instant
@@ -450,7 +451,13 @@ class TreeRepository(
                     AppEventLog.info("git", "При запуске найдена новая версия в Git")
                     return refreshFromGit()
                 }
-                is RemoteRefresh.Diverged -> return status
+                is RemoteRefresh.Diverged -> {
+                    if (status.count > 0) {
+                        AppEventLog.info("git", "Пустое древо: загрузка из Git (${status.count} чел.)")
+                        return refreshFromGit()
+                    }
+                    return status
+                }
                 is RemoteRefresh.Failed -> {
                     if (NetworkHelper.looksLikeNetworkIssue(status.message) && attempt < 4) {
                         delay(2_000L)
@@ -468,28 +475,23 @@ class TreeRepository(
         val look = lookAtGit() ?: return RemoteRefresh.NotConfigured
         return look.fold(
             onSuccess = { snapshot ->
-                when (
-                    relateGit(
-                        snapshot.localHash,
-                        snapshot.remoteHash,
-                        snapshot.remote?.sha,
-                        snapshot.marker?.hash,
-                        snapshot.marker?.sha,
-                    )
-                ) {
-                    GitRelation.Same -> {
-                        snapshot.remote?.let { writeMarker(it.sha, snapshot.localHash) }
-                        RemoteRefresh.Unchanged
-                    }
-                    GitRelation.RemoteNewer -> RemoteRefresh.Incoming(snapshot.remoteDoc?.people?.size ?: 0)
-                    GitRelation.LocalNewer, GitRelation.RemoteMissing ->
-                        if (snapshot.local.people.isEmpty() && snapshot.remote == null) {
-                            RemoteRefresh.Unchanged
-                        } else {
-                            RemoteRefresh.LocalAhead(snapshot.local.people.size)
-                        }
-                    GitRelation.Diverged -> RemoteRefresh.Diverged(snapshot.remoteDoc?.people?.size ?: 0)
+                val relation = relateGit(
+                    snapshot.localHash,
+                    snapshot.remoteHash,
+                    snapshot.remote?.sha,
+                    snapshot.marker?.hash,
+                    snapshot.marker?.sha,
+                )
+                val result = inspectGitRefresh(
+                    localPeopleCount = snapshot.local.people.size,
+                    remotePeopleCount = snapshot.remoteDoc?.people?.size,
+                    remoteFilePresent = snapshot.remote != null,
+                    relation = relation,
+                )
+                if (result is RemoteRefresh.Unchanged && relation == GitRelation.Same) {
+                    snapshot.remote?.let { writeMarker(it.sha, snapshot.localHash) }
                 }
+                result
             },
             onFailure = { error ->
                 if (error is kotlinx.coroutines.CancellationException) throw error
@@ -508,7 +510,11 @@ class TreeRepository(
                     ?: return RemoteRefresh.Failed("В репозитории ещё нет файла древа. Отправьте древо кнопкой в настройках.")
                 val remoteDoc = snapshot.remoteDoc
                     ?: return RemoteRefresh.Failed("Файл в Git не удалось прочитать")
-                if (snapshot.remoteHash == snapshot.localHash) {
+                val localEmpty = snapshot.local.people.isEmpty()
+                val remoteHasPeople = remoteDoc.people.isNotEmpty()
+                if (localEmpty && remoteHasPeople) {
+                    applyDocumentFromGit(remoteDoc, remote.sha)
+                } else if (snapshot.remoteHash == snapshot.localHash) {
                     writeMarker(remote.sha, snapshot.localHash)
                     RemoteRefresh.Unchanged
                 } else {

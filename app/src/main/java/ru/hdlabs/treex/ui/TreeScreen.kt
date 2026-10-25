@@ -236,7 +236,20 @@ fun TreeScreen(nav: NavHostController, highlight: String) {
             }
             Spacer(Modifier.height(4.dp))
             when {
-                state.people.isEmpty() -> EmptyTree { nav.navigate(Routes.edit("new")) }
+                state.people.isEmpty() -> EmptyTree(
+                    gitConfigured = settings.gitConfigured,
+                    onAdd = { nav.navigate(Routes.edit("new")) },
+                    onLoadGit = {
+                        scope.launch {
+                            refreshing = true
+                            try {
+                                updatedMessage = appliedGitMessage(app.container.treeRepository.refreshFromGit())
+                            } finally {
+                                refreshing = false
+                            }
+                        }
+                    },
+                )
                 query.isNotBlank() && visible.isEmpty() -> Text("Никого не нашлось", color = HdTextSecondary)
                 query.isNotBlank() -> Column(Modifier.weight(1f).verticalScroll(rememberScrollState())) {
                     visible.forEach { person ->
@@ -656,13 +669,21 @@ private fun TreeAction(text: String, primary: Boolean = false, onClick: () -> Un
 }
 
 @Composable
-private fun EmptyTree(onAdd: () -> Unit) {
+private fun EmptyTree(gitConfigured: Boolean, onAdd: () -> Unit, onLoadGit: () -> Unit) {
     Text(
-        "Начните с одного человека. Потом к нему можно добавить родителей, супруга и детей отдельными кнопками.",
+        if (gitConfigured) {
+            "Древо пустое. Загрузите его из семейного Git или добавьте первого человека вручную."
+        } else {
+            "Начните с одного человека. Потом к нему можно добавить родителей, супруга и детей отдельными кнопками."
+        },
         color = HdTextSecondary,
     )
     Spacer(Modifier.height(12.dp))
-    HdPrimaryButton("Добавить первого человека", onClick = onAdd)
+    if (gitConfigured) {
+        HdPrimaryButton("Загрузить из Git", onClick = onLoadGit)
+        Spacer(Modifier.height(8.dp))
+    }
+    HdSecondaryButton("Добавить первого человека", onClick = onAdd)
 }
 
 @Composable
