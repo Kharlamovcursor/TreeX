@@ -347,16 +347,36 @@ fun PersonEditorScreen(routeId: String, role: String, anchor: String, nav: NavHo
             draft.lastName.isNotBlank()
     }
 
+    val host = tree.people.find { it.id == anchor }
     val screenTitle = when {
-        !creating -> "Карточка"
+        !creating -> "Изменить"
         role == "father" -> "Новый отец"
         role == "mother" -> "Новая мать"
+        role == "spouse" && host?.gender == "m" -> "Новая супруга"
+        role == "spouse" && host?.gender == "f" -> "Новый супруг"
         role == "spouse" -> "Новый супруг"
         role == "child" -> "Новый ребёнок"
         else -> "Новый человек"
     }
+    val relationHint = when {
+        !creating || host == null -> ""
+        role == "father" -> "Это отец для ${host.fullName()}. Фамилия подставится сама."
+        role == "mother" -> "Это мать для ${host.fullName()}. Фамилия подставится сама."
+        role == "spouse" && host.gender == "m" -> "Это супруга для ${host.fullName()}."
+        role == "spouse" -> "Это супруг для ${host.fullName()}."
+        role == "child" -> "Это ребёнок для ${host.fullName()}. Фамилия и отчество подставятся сами."
+        else -> ""
+    }
     HdScaffold(title = screenTitle, onBack = { finish() }) {
         Column(Modifier.fillMaxWidth().scale(scale).alpha(alpha)) {
+            if (relationHint.isNotBlank()) {
+                Text(relationHint, color = HdOrange, fontWeight = FontWeight.SemiBold)
+                Text(
+                    "Достаточно фамилии и имени. Телефон, почту и даты можно дописать ниже или позже.",
+                    color = HdTextSecondary,
+                    modifier = Modifier.padding(top = 4.dp, bottom = 12.dp),
+                )
+            }
             HdCard {
                 Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
                     PersonAvatar(draft, 96.dp, Modifier.clickable { photoPicker.launch("image/*") })
@@ -395,8 +415,8 @@ fun PersonEditorScreen(routeId: String, role: String, anchor: String, nav: NavHo
             }
             Spacer(Modifier.height(12.dp))
             HdCard {
-                Text("Связи", color = HdTextPrimary, fontWeight = FontWeight.SemiBold)
-                Text("Отец, мать и супруги собирают поколение на главном экране.", color = HdTextSecondary, modifier = Modifier.padding(bottom = 8.dp))
+                Text("К кому относится", color = HdTextPrimary, fontWeight = FontWeight.SemiBold)
+                Text("Кнопка выбирает уже существующего человека. Новый человек создаётся с древа.", color = HdTextSecondary, modifier = Modifier.padding(bottom = 8.dp))
                 RelationRow("Отец", tree.people.find { it.id == fatherId }?.fullName() ?: "не выбран", { picker = Picker.Father }, { buffer.mark("father"); fatherId = "" })
                 RelationRow("Мать", tree.people.find { it.id == motherId }?.fullName() ?: "не выбрана", { picker = Picker.Mother }, { buffer.mark("mother"); motherId = "" })
                 spouseDrafts.forEach { spouse ->
@@ -529,7 +549,7 @@ fun PersonDetailScreen(personId: String, nav: NavHostController) {
                     val married = tree.unions.find {
                         setOf(it.partnerAId, it.partnerBId) == setOf(person.id, spouse.id)
                     }?.marriedOn.orEmpty()
-                    LinkLine("Супруг", spouse, nav, if (married.isBlank()) "" else ", брак $married")
+                    LinkLine(spouseNoun(person.gender), spouse, nav, if (married.isBlank()) "" else ", брак $married")
                 }
             }
             if (children.isEmpty()) Text("Детей в древе нет", color = HdTextSecondary, modifier = Modifier.padding(top = 6.dp))
@@ -577,14 +597,12 @@ fun PersonDetailScreen(personId: String, nav: NavHostController) {
 
 @Composable
 private fun LinkLine(label: String, person: PersonEntity?, nav: NavHostController, suffix: String = "") {
-    Text(
-        "$label: ${person?.fullName() ?: "не указан"}$suffix",
-        color = if (person == null) HdTextSecondary else HdBlue,
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 4.dp)
-            .clickable(enabled = person != null) { person?.let { nav.navigate(Routes.person(it.id)) } },
-    )
+    if (person == null) {
+        Text("$label: не указан", color = HdTextSecondary, modifier = Modifier.padding(vertical = 4.dp))
+    } else {
+        HdSecondaryButton("$label: ${person.fullName()}$suffix") { nav.navigate(Routes.person(person.id)) }
+        Spacer(Modifier.height(8.dp))
+    }
 }
 
 @Composable

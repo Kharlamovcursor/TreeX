@@ -33,6 +33,8 @@ import ru.hdlabs.treex.domain.mergePerson
 import ru.hdlabs.treex.domain.mergeSpouseDrafts
 import ru.hdlabs.treex.domain.spouseDraftsOf
 import ru.hdlabs.treex.sync.GitHubTreeSync
+import ru.hdlabs.treex.sync.GitRelation
+import ru.hdlabs.treex.sync.relateGit
 import java.io.File
 import java.time.Instant
 import java.time.ZoneId
@@ -51,6 +53,9 @@ data class SnapshotInfo(
 
 sealed interface RemoteRefresh {
     data class Updated(val count: Int) : RemoteRefresh
+    data class Incoming(val count: Int) : RemoteRefresh
+    data class LocalAhead(val count: Int) : RemoteRefresh
+    data class Diverged(val count: Int) : RemoteRefresh
     data object Unchanged : RemoteRefresh
     data class Failed(val message: String) : RemoteRefresh
     data object NotConfigured : RemoteRefresh
@@ -246,37 +251,71 @@ class TreeRepository(
         schedulePush()
     }
 
-    suspend fun refreshFromGit(): RemoteRefresh {
-        val settings = settingsRepository.settings.first()
-        if (!settings.gitConfigured) return RemoteRefresh.NotConfigured
-        return try {
-            val sync = syncFor(settings)
-            val remote = withContext(Dispatchers.IO) { sync.fetch() }
-                ?: return RemoteRefresh.Failed("В репозитории ещё нет файла древа. Если он должен там быть, свяжитесь с разработчиком.")
-            val local = mutex.withLock { readLocked() }
-            val remoteDoc = TreeCodec.decode(remote.text)
-            if (TreeCodec.contentHash(remoteDoc) == TreeCodec.contentHash(local)) {
-                writeMarker(remote.sha, TreeCodec.contentHash(remoteDoc))
-                RemoteRefresh.Unchanged
-            } else {
-                mutex.withLock {
-                    snapshotLocked(readLocked())
-                    replaceLocked(remoteDoc)
-                    generation += 1
+    suspend fun inspectGit(): RemoteRefresh {
+        val look = lookAtGit() ?: return RemoteRefresh.NotConfigured
+        return look.fold(
+            onSuccess = { snapshot ->
+                when (
+                    relateGit(
+                        snapshot.localHash,
+                        snapshot.remoteHash,
+                        snapshot.remote?.sha,
+                        snapshot.marker?.hash,
+                        snapshot.marker?.sha,
+                    )
+                ) {
+                    GitRelation.Same -> {
+                        snapshot.remote?.let { writeMarker(it.sha, snapshot.localHash) }
+                        RemoteRefresh.Unchanged
+                    }
+                    GitRelation.RemoteNewer -> RemoteRefresh.Incoming(snapshot.remoteDoc?.people?.size ?: 0)
+                    GitRelation.LocalNewer, GitRelation.RemoteMissing ->
+                        if (snapshot.local.people.isEmpty() && snapshot.remote == null) {
+                            RemoteRefresh.Unchanged
+                        } else {
+                            RemoteRefresh.LocalAhead(snapshot.local.people.size)
+                        }
+                    GitRelation.Diverged -> RemoteRefresh.Diverged(snapshot.remoteDoc?.people?.size ?: 0)
                 }
-                writeMarker(remote.sha, TreeCodec.contentHash(remoteDoc))
-                RemoteRefresh.Updated(remoteDoc.people.size)
-            }
-        } catch (e: kotlinx.coroutines.CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            RemoteRefresh.Failed(e.message ?: "Не удалось получить данные из Git")
-        }
+            },
+            onFailure = { error ->
+                if (error is kotlinx.coroutines.CancellationException) throw error
+                RemoteRefresh.Failed(error.message ?: "Не удалось получить данные из Git")
+            },
+        )
+    }
+
+    suspend fun refreshFromGit(): RemoteRefresh {
+        val look = lookAtGit() ?: return RemoteRefresh.NotConfigured
+        return look.fold(
+            onSuccess = { snapshot ->
+                val remote = snapshot.remote
+                    ?: return RemoteRefresh.Failed("В репозитории ещё нет файла древа. Отправьте древо кнопкой в настройках.")
+                val remoteDoc = snapshot.remoteDoc
+                    ?: return RemoteRefresh.Failed("Файл в Git не удалось прочитать")
+                if (snapshot.remoteHash == snapshot.localHash) {
+                    writeMarker(remote.sha, snapshot.localHash)
+                    RemoteRefresh.Unchanged
+                } else {
+                    mutex.withLock {
+                        snapshotLocked(readLocked())
+                        replaceLocked(remoteDoc)
+                        generation += 1
+                    }
+                    writeMarker(remote.sha, TreeCodec.contentHash(remoteDoc))
+                    RemoteRefresh.Updated(remoteDoc.people.size)
+                }
+            },
+            onFailure = { error ->
+                if (error is kotlinx.coroutines.CancellationException) throw error
+                RemoteRefresh.Failed(error.message ?: "Не удалось получить данные из Git")
+            },
+        )
     }
 
     suspend fun pushNow(): String {
         pushJob?.cancel()
-        return if (pushToGit()) "Древо отправлено в Git" else "Git уже совпадает с телефоном"
+        return if (pushToGit(force = true)) "Древо отправлено в Git" else "Git уже совпадает с телефоном"
     }
 
     suspend fun remoteCommits(): List<GitHubTreeSync.RemoteCommit> {
@@ -305,7 +344,7 @@ class TreeRepository(
             delay(10_000)
             val settings = settingsRepository.settings.first()
             if (!settings.gitConfigured) return@launch
-            runCatching { pushToGit() }
+            runCatching { pushToGit(force = false) }
                 .onSuccess { syncNoteState.value = null }
                 .onFailure { error ->
                     if (error is kotlinx.coroutines.CancellationException) throw error
@@ -314,7 +353,25 @@ class TreeRepository(
         }
     }
 
-    private suspend fun pushToGit(): Boolean {
+    private suspend fun lookAtGit(): Result<GitSnapshot>? {
+        val settings = settingsRepository.settings.first()
+        if (!settings.gitConfigured) return null
+        return runCatching {
+            val remote = withContext(Dispatchers.IO) { syncFor(settings).fetch() }
+            val remoteDoc = remote?.let { TreeCodec.decode(it.text) }
+            val local = mutex.withLock { readLocked() }
+            GitSnapshot(
+                remote = remote,
+                remoteDoc = remoteDoc,
+                local = local,
+                localHash = TreeCodec.contentHash(local),
+                remoteHash = remoteDoc?.let { TreeCodec.contentHash(it) },
+                marker = readMarker(),
+            )
+        }
+    }
+
+    private suspend fun pushToGit(force: Boolean): Boolean {
         val settings = settingsRepository.settings.first()
         if (!settings.gitConfigured) throw IllegalStateException("Git не настроен")
         val captured = mutex.withLock { generation to TreeCodec.encode(readLocked()) }
@@ -328,9 +385,9 @@ class TreeRepository(
                 writeMarker(remote.sha, localHash)
                 return false
             }
-            val remoteMoved = marker == null || (marker.sha != remote.sha && marker.hash != remoteHash)
-            if (remoteMoved) {
-                throw IllegalStateException("В Git есть версия, которой нет на телефоне. Сначала нажмите «Обновить информацию».")
+            val relation = relateGit(localHash, remoteHash, remote.sha, marker?.hash, marker?.sha)
+            if (!force && (relation == GitRelation.RemoteNewer || relation == GitRelation.Diverged)) {
+                throw IllegalStateException("В Git другая версия. На главном экране нажмите обновление и выберите: загрузить Git или отправить телефон.")
             }
         }
         val stillCurrent = mutex.withLock { generation == captured.first }
@@ -401,6 +458,15 @@ class TreeRepository(
         first.copy(createdAtMillis = 0, updatedAtMillis = 0) == second.copy(createdAtMillis = 0, updatedAtMillis = 0)
 
     private data class GitMarker(val sha: String, val hash: String)
+
+    private data class GitSnapshot(
+        val remote: GitHubTreeSync.RemoteFile?,
+        val remoteDoc: TreeDocument?,
+        val local: TreeDocument,
+        val localHash: String,
+        val remoteHash: String?,
+        val marker: GitMarker?,
+    )
 }
 
 private fun PersonEntity.toRecord() = PersonRecord(

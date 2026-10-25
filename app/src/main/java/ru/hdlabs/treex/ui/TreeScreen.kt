@@ -4,13 +4,9 @@ import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -23,13 +19,11 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
@@ -64,6 +58,7 @@ import ru.hdlabs.treex.domain.fullName
 import ru.hdlabs.treex.domain.lifeLine
 import ru.hdlabs.treex.domain.matchesQuery
 import ru.hdlabs.treex.domain.spouseIdsOf
+import ru.hdlabs.treex.domain.addSpouseLabel
 import ru.hdlabs.treex.domain.spouseNoun
 import ru.hdlabs.treex.feedback.TelegramFeedback
 import ru.hdlabs.treex.navigation.Routes
@@ -71,7 +66,6 @@ import ru.hdlabs.treex.ui.components.HdPrimaryButton
 import ru.hdlabs.treex.ui.components.HdScaffold
 import ru.hdlabs.treex.ui.components.HdSecondaryButton
 import ru.hdlabs.treex.ui.components.HdTextField
-import ru.hdlabs.treex.ui.theme.HdBlack
 import ru.hdlabs.treex.ui.theme.HdBlue
 import ru.hdlabs.treex.ui.theme.HdOrange
 import ru.hdlabs.treex.ui.theme.HdPanelElevated
@@ -91,6 +85,7 @@ fun TreeScreen(nav: NavHostController, highlight: String) {
     var refreshing by remember { mutableStateOf(false) }
     var updatedMessage by remember { mutableStateOf<String?>(null) }
     var developerMessage by remember { mutableStateOf<String?>(null) }
+    var gitChoice by remember { mutableStateOf<RemoteRefresh.Diverged?>(null) }
     var activeHighlight by remember { mutableStateOf(highlight) }
 
     LaunchedEffect(highlight) {
@@ -121,31 +116,28 @@ fun TreeScreen(nav: NavHostController, highlight: String) {
                 if (refreshing) return@IconButton
                 scope.launch {
                     refreshing = true
-                    when (val result = app.container.treeRepository.refreshFromGit()) {
-                        is RemoteRefresh.Updated -> updatedMessage = "Информация обновлена. В древе ${result.count} чел."
-                        RemoteRefresh.Unchanged -> developerMessage =
-                            "Новой информации в Git нет. Если вы ожидали изменения, свяжитесь с разработчиком."
-                        RemoteRefresh.NotConfigured -> developerMessage =
-                            "Git не настроен, новую информацию взять неоткуда. Если данные должны были обновиться, свяжитесь с разработчиком."
-                        is RemoteRefresh.Failed -> developerMessage =
-                            "${result.message} Если это повторяется, свяжитесь с разработчиком."
+                    try {
+                        when (val result = app.container.treeRepository.inspectGit()) {
+                            is RemoteRefresh.Incoming -> updatedMessage = appliedGitMessage(
+                                app.container.treeRepository.refreshFromGit(),
+                            )
+                            is RemoteRefresh.LocalAhead -> updatedMessage = app.container.treeRepository.pushNow()
+                            is RemoteRefresh.Diverged -> gitChoice = result
+                            is RemoteRefresh.Updated -> updatedMessage = "Информация обновлена. В древе ${result.count} чел."
+                            RemoteRefresh.Unchanged -> updatedMessage = "Телефон и Git уже совпадают."
+                            RemoteRefresh.NotConfigured -> updatedMessage =
+                                "Git не настроен. Откройте настройки и укажите репозиторий и токен."
+                            is RemoteRefresh.Failed -> developerMessage = result.message
+                        }
+                    } finally {
+                        refreshing = false
                     }
-                    refreshing = false
                 }
             }) {
                 Icon(Icons.Filled.Refresh, contentDescription = "Обновить информацию", tint = HdTextPrimary)
             }
             IconButton(onClick = { nav.navigate(Routes.SETTINGS) }) {
                 Icon(Icons.Filled.Settings, contentDescription = "Настройки", tint = HdTextPrimary)
-            }
-        },
-        floating = {
-            FloatingActionButton(
-                onClick = { nav.navigate(Routes.edit("new")) },
-                containerColor = HdBlue,
-                contentColor = HdBlack,
-            ) {
-                Icon(Icons.Filled.Add, contentDescription = "Добавить человека")
             }
         },
     ) {
@@ -163,10 +155,17 @@ fun TreeScreen(nav: NavHostController, highlight: String) {
             }
             Spacer(Modifier.height(12.dp))
             when {
-                state.people.isEmpty() -> EmptyTree()
+                state.people.isEmpty() -> EmptyTree { nav.navigate(Routes.edit("new")) }
                 query.isNotBlank() && visible.isEmpty() -> Text("Никого не нашлось", color = HdTextSecondary)
                 query.isNotBlank() -> visible.forEach { person ->
-                    PersonCard(person, person.id == activeHighlight) { nav.navigate(Routes.person(person.id)) }
+                    PersonCard(
+                        person = person,
+                        fresh = person.id == activeHighlight,
+                        hint = "Открыть семью",
+                    ) {
+                        query = ""
+                        focusId = person.id
+                    }
                     Spacer(Modifier.height(8.dp))
                 }
                 focus != null -> Pedigree(
@@ -176,7 +175,7 @@ fun TreeScreen(nav: NavHostController, highlight: String) {
                     freshId = activeHighlight,
                     isHome = focus.id == settings.homePersonId,
                     onFocus = { focusId = it.id },
-                    onOpen = { nav.navigate(Routes.person(it.id)) },
+                    onOpen = { nav.navigate(Routes.edit(it.id)) },
                     onAdd = { role, anchor -> nav.navigate(Routes.edit("new", role, anchor)) },
                     onMakeHome = {
                         scope.launch {
@@ -200,17 +199,56 @@ fun TreeScreen(nav: NavHostController, highlight: String) {
     developerMessage?.let { message ->
         AlertDialog(
             onDismissRequest = { developerMessage = null },
-            title = { Text("Информация не обновилась") },
+            title = { Text("Git не ответил") },
             text = { Text(message, color = HdTextSecondary) },
-            confirmButton = {
-                HdPrimaryButton("Написать в Telegram") {
+            confirmButton = { HdPrimaryButton("Понятно") { developerMessage = null } },
+            dismissButton = {
+                HdSecondaryButton("Написать в Telegram") {
                     TelegramFeedback.open(context)
                     developerMessage = null
                 }
             },
-            dismissButton = { HdSecondaryButton("Закрыть") { developerMessage = null } },
         )
     }
+    gitChoice?.let { choice ->
+        AlertDialog(
+            onDismissRequest = { gitChoice = null },
+            title = { Text("В Git другая версия") },
+            text = {
+                Text(
+                    "В Git ${choice.count} чел., и на телефоне есть свои правки. Загрузить Git или отправить телефон?",
+                    color = HdTextSecondary,
+                )
+            },
+            confirmButton = {
+                HdPrimaryButton("Загрузить из Git") {
+                    gitChoice = null
+                    scope.launch {
+                        updatedMessage = appliedGitMessage(app.container.treeRepository.refreshFromGit())
+                    }
+                }
+            },
+            dismissButton = {
+                HdSecondaryButton("Отправить телефон") {
+                    gitChoice = null
+                    scope.launch {
+                        updatedMessage = runCatching { app.container.treeRepository.pushNow() }
+                            .getOrElse { it.message ?: "Не удалось отправить в Git" }
+                    }
+                }
+            },
+        )
+    }
+}
+
+private fun appliedGitMessage(result: RemoteRefresh): String = when (result) {
+    is RemoteRefresh.Updated -> "Информация обновлена. В древе ${result.count} чел."
+    RemoteRefresh.Unchanged -> "Телефон и Git уже совпадают."
+    RemoteRefresh.NotConfigured -> "Git не настроен. Откройте настройки и укажите репозиторий и токен."
+    is RemoteRefresh.Failed -> result.message
+    is RemoteRefresh.Incoming -> "В Git другая версия, ${result.count} чел."
+    is RemoteRefresh.LocalAhead -> "На телефоне есть правки, которых нет в Git."
+    is RemoteRefresh.Diverged -> "В Git другая версия, ${result.count} чел."
 }
 
 @Composable
@@ -239,95 +277,116 @@ private fun Pedigree(
     }.sortedBy { it.birthDate }
 
     Text("Родители", color = HdTextPrimary, fontWeight = FontWeight.SemiBold)
-    Spacer(Modifier.height(8.dp))
-    LazyRow(Modifier.height(190.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-        if (father != null) {
-            item(key = father.id) {
-                PersonCard(father, father.id == freshId, Modifier.width(150.dp)) { onFocus(father) }
+    Text("Карточка открывает семью этого человека.", color = HdTextSecondary, modifier = Modifier.padding(bottom = 8.dp))
+    if (father != null || mother != null) {
+        LazyRow(Modifier.height(210.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            if (father != null) {
+                item(key = father.id) {
+                    PersonCard(father, father.id == freshId, Modifier.width(150.dp), "Отец") { onFocus(father) }
+                }
             }
-        } else {
-            item(key = "add-father") { AddSlot("Отец") { onAdd("father", focus.id) } }
-        }
-        if (mother != null) {
-            item(key = mother.id) {
-                PersonCard(mother, mother.id == freshId, Modifier.width(150.dp)) { onFocus(mother) }
+            if (mother != null) {
+                item(key = mother.id) {
+                    PersonCard(mother, mother.id == freshId, Modifier.width(150.dp), "Мать") { onFocus(mother) }
+                }
             }
-        } else {
-            item(key = "add-mother") { AddSlot("Мать") { onAdd("mother", focus.id) } }
         }
+        Spacer(Modifier.height(8.dp))
+    }
+    if (father == null) {
+        HdSecondaryButton("Добавить отца") { onAdd("father", focus.id) }
+        Spacer(Modifier.height(8.dp))
+    }
+    if (mother == null) {
+        HdSecondaryButton("Добавить мать") { onAdd("mother", focus.id) }
+        Spacer(Modifier.height(8.dp))
     }
     if (siblings.isNotEmpty()) {
-        Spacer(Modifier.height(8.dp))
         Text("Братья и сёстры", color = HdTextSecondary)
-        LazyRow(Modifier.height(168.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        Spacer(Modifier.height(8.dp))
+        LazyRow(Modifier.height(210.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             items(siblings, key = { it.id }) { person ->
-                PersonCard(person, person.id == freshId, Modifier.width(140.dp)) { onFocus(person) }
+                PersonCard(person, person.id == freshId, Modifier.width(140.dp), "Открыть") { onFocus(person) }
             }
         }
     }
-    LinkDown()
-    Text(if (isHome) "Это главная карточка" else "Сейчас в центре", color = HdTextSecondary)
     Spacer(Modifier.height(8.dp))
-    LazyRow(Modifier.height(210.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-        items(spouses, key = { it.id }) { person ->
-            PersonCard(person, person.id == freshId, Modifier.width(140.dp)) { onFocus(person) }
+    FocusCard(
+        person = focus,
+        isHome = isHome,
+        fresh = focus.id == freshId,
+        onEdit = { onOpen(focus) },
+        onMakeHome = onMakeHome,
+    )
+    Spacer(Modifier.height(16.dp))
+    Text(spouseNoun(focus.gender), color = HdTextPrimary, fontWeight = FontWeight.SemiBold)
+    Text("Рядом с выбранным человеком.", color = HdTextSecondary, modifier = Modifier.padding(bottom = 8.dp))
+    if (spouses.isNotEmpty()) {
+        LazyRow(Modifier.height(210.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            items(spouses, key = { it.id }) { person ->
+                PersonCard(person, person.id == freshId, Modifier.width(150.dp), "Открыть") { onFocus(person) }
+            }
         }
-        item(key = "focus-${focus.id}") {
-            PersonCard(focus, true, Modifier.width(168.dp)) { onOpen(focus) }
-        }
-        item(key = "add-spouse") { AddSlot(spouseNoun(focus.gender)) { onAdd("spouse", focus.id) } }
-    }
-    Spacer(Modifier.height(8.dp))
-    HdSecondaryButton("Открыть карточку") { onOpen(focus) }
-    Spacer(Modifier.height(8.dp))
-    if (!isHome) {
-        HdSecondaryButton("Сделать главной") { onMakeHome() }
         Spacer(Modifier.height(8.dp))
     }
-    LinkDown()
+    HdSecondaryButton(addSpouseLabel(focus.gender)) { onAdd("spouse", focus.id) }
+    Spacer(Modifier.height(16.dp))
     Text("Дети", color = HdTextPrimary, fontWeight = FontWeight.SemiBold)
-    Spacer(Modifier.height(8.dp))
-    LazyRow(Modifier.height(190.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-        items(children, key = { it.id }) { person ->
-            PersonCard(person, person.id == freshId, Modifier.width(150.dp)) { onFocus(person) }
+    Text("Ниже выбранного человека.", color = HdTextSecondary, modifier = Modifier.padding(bottom = 8.dp))
+    if (children.isNotEmpty()) {
+        LazyRow(Modifier.height(210.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            items(children, key = { it.id }) { person ->
+                PersonCard(person, person.id == freshId, Modifier.width(150.dp), "Открыть") { onFocus(person) }
+            }
         }
-        item(key = "add-child") { AddSlot("Ребёнок") { onAdd("child", focus.id) } }
+        Spacer(Modifier.height(8.dp))
     }
+    HdSecondaryButton("Добавить ребёнка") { onAdd("child", focus.id) }
+    Spacer(Modifier.height(16.dp))
+    HdSecondaryButton("Добавить человека без родства") { onAdd("", "") }
+}
+
+@Composable
+private fun EmptyTree(onAdd: () -> Unit) {
     Text(
-        "Нажатие на родственника переносит его в центр. Пустая ячейка создаёт карточку и сама проставляет фамилию и отчество.",
+        "Начните с одного человека. Потом к нему можно добавить родителей, супруга и детей отдельными кнопками.",
         color = HdTextSecondary,
-        modifier = Modifier.padding(top = 8.dp),
     )
+    Spacer(Modifier.height(12.dp))
+    HdPrimaryButton("Добавить первого человека", onClick = onAdd)
 }
 
 @Composable
-private fun LinkDown() {
-    Box(Modifier.fillMaxWidth().height(18.dp), contentAlignment = Alignment.Center) {
-        Box(Modifier.width(2.dp).height(18.dp).background(HdBlue.copy(alpha = 0.45f)))
-    }
-}
-
-@Composable
-private fun AddSlot(label: String, onClick: () -> Unit) {
+private fun FocusCard(
+    person: PersonEntity,
+    isHome: Boolean,
+    fresh: Boolean,
+    onEdit: () -> Unit,
+    onMakeHome: () -> Unit,
+) {
     Card(
-        modifier = Modifier.width(132.dp).height(168.dp).clickable(onClick = onClick),
         shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(containerColor = HdPanelElevated.copy(alpha = 0.55f)),
-        border = BorderStroke(1.dp, HdBlue.copy(alpha = 0.45f)),
+        colors = CardDefaults.cardColors(containerColor = HdPanelElevated.copy(alpha = 0.94f)),
+        border = BorderStroke(2.dp, if (fresh) HdOrange else HdBlue),
     ) {
-        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            Text("＋ $label", color = HdBlue, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center)
+        Column(Modifier.fillMaxWidth().padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+            Text(if (isHome) "Главный человек" else "Сейчас смотрим", color = HdOrange, fontWeight = FontWeight.SemiBold)
+            Spacer(Modifier.height(8.dp))
+            PersonAvatar(person, 96.dp)
+            Spacer(Modifier.height(8.dp))
+            Text(person.fullName(), color = HdTextPrimary, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center)
+            val years = person.lifeLine()
+            if (years.isNotBlank()) Text(years, color = HdTextSecondary, textAlign = TextAlign.Center)
+            if (person.birthPlace.isNotBlank()) Text(person.birthPlace, color = HdTextSecondary, textAlign = TextAlign.Center)
+            if (person.phone.isNotBlank()) Text(person.phone, color = HdTextSecondary)
+            Spacer(Modifier.height(12.dp))
+            HdPrimaryButton("Изменить данные", onClick = onEdit)
+            if (!isHome) {
+                Spacer(Modifier.height(8.dp))
+                HdSecondaryButton("Сделать главным", onClick = onMakeHome)
+            }
         }
     }
-}
-
-@Composable
-private fun EmptyTree() {
-    Text(
-        "Добавьте первого человека. Карточка появится в древе плавно и сразу сохранится на телефоне.",
-        color = HdTextSecondary,
-        textAlign = TextAlign.Start,
-    )
 }
 
 @Composable
@@ -335,6 +394,7 @@ private fun PersonCard(
     person: PersonEntity,
     fresh: Boolean,
     modifier: Modifier = Modifier,
+    hint: String,
     onClick: () -> Unit,
 ) {
     var shown by remember(person.id) { mutableStateOf(!fresh) }
@@ -357,9 +417,10 @@ private fun PersonCard(
         Column(Modifier.padding(12.dp), horizontalAlignment = Alignment.CenterHorizontally) {
             PersonAvatar(person, 64.dp)
             Spacer(Modifier.height(8.dp))
-            Text(person.fullName(), color = HdTextPrimary, fontWeight = FontWeight.SemiBold, maxLines = 3, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center)
+            Text(person.fullName(), color = HdTextPrimary, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center)
             val years = person.lifeLine()
-            if (years.isNotBlank()) Text(years, color = HdTextSecondary, maxLines = 2, textAlign = TextAlign.Center)
+            if (years.isNotBlank()) Text(years, color = HdTextSecondary, maxLines = 1, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center)
+            Text(hint, color = HdOrange, maxLines = 1)
         }
     }
 }

@@ -27,6 +27,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import ru.hdlabs.treex.BuildConfig
 import ru.hdlabs.treex.TreeXApplication
+import ru.hdlabs.treex.data.RemoteRefresh
 import ru.hdlabs.treex.ui.HistoryScreen
 import ru.hdlabs.treex.ui.PersonDetailScreen
 import ru.hdlabs.treex.ui.PersonEditorScreen
@@ -60,18 +61,28 @@ fun TreeNavHost() {
     val motion = LocalHdMotion.current
     val scope = rememberCoroutineScope()
     var pendingUpdate by remember { mutableStateOf<UpdateInfo?>(null) }
+    var pendingGit by remember { mutableStateOf<RemoteRefresh?>(null) }
+    var gitNotice by remember { mutableStateOf<String?>(null) }
     var updateError by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(Unit) {
         delay(5_000)
-        if (!ReleaseUpdateConfig.isConfigured()) return@LaunchedEffect
-        val info = runCatching {
-            withContext(Dispatchers.IO) {
-                app.container.updateSource(ReleaseUpdateConfig.githubOwner, ReleaseUpdateConfig.githubRepo)
-                    .checkForUpdate(BuildConfig.VERSION_CODE)
+        launch {
+            if (!ReleaseUpdateConfig.isConfigured()) return@launch
+            val info = runCatching {
+                withContext(Dispatchers.IO) {
+                    app.container.updateSource(ReleaseUpdateConfig.githubOwner, ReleaseUpdateConfig.githubRepo)
+                        .checkForUpdate(BuildConfig.VERSION_CODE)
+                }
+            }.getOrNull()
+            if (info != null) pendingUpdate = info
+        }
+        launch {
+            when (val git = runCatching { app.container.treeRepository.inspectGit() }.getOrNull()) {
+                is RemoteRefresh.Incoming, is RemoteRefresh.Diverged -> pendingGit = git
+                else -> Unit
             }
-        }.getOrNull()
-        if (info != null) pendingUpdate = info
+        }
     }
 
     NavHost(
@@ -151,6 +162,62 @@ fun TreeNavHost() {
                 }
             },
             dismissButton = { HdSecondaryButton("Не сейчас") { pendingUpdate = null } },
+        )
+    }
+    pendingGit?.let { git ->
+        val count = when (git) {
+            is RemoteRefresh.Incoming -> git.count
+            is RemoteRefresh.Diverged -> git.count
+            else -> 0
+        }
+        val diverged = git is RemoteRefresh.Diverged
+        AlertDialog(
+            onDismissRequest = { pendingGit = null },
+            title = { Text(if (diverged) "В Git другая версия" else "В Git есть обновление") },
+            text = {
+                Text(
+                    if (diverged) {
+                        "В Git $count чел., и на телефоне есть свои правки. Загрузить Git или отправить телефон?"
+                    } else {
+                        "В Git более новое древо, $count чел. Загрузить его на телефон?"
+                    },
+                    color = HdTextSecondary,
+                )
+            },
+            confirmButton = {
+                HdPrimaryButton("Загрузить") {
+                    pendingGit = null
+                    scope.launch {
+                        gitNotice = when (val result = app.container.treeRepository.refreshFromGit()) {
+                            is RemoteRefresh.Updated -> "Информация обновлена. В древе ${result.count} чел."
+                            is RemoteRefresh.Failed -> result.message
+                            RemoteRefresh.Unchanged -> "Телефон и Git уже совпадают."
+                            else -> "Не удалось загрузить древо из Git"
+                        }
+                    }
+                }
+            },
+            dismissButton = {
+                if (diverged) {
+                    HdSecondaryButton("Отправить телефон") {
+                        pendingGit = null
+                        scope.launch {
+                            gitNotice = runCatching { app.container.treeRepository.pushNow() }
+                                .getOrElse { it.message ?: "Не удалось отправить в Git" }
+                        }
+                    }
+                } else {
+                    HdSecondaryButton("Не сейчас") { pendingGit = null }
+                }
+            },
+        )
+    }
+    gitNotice?.let { text ->
+        AlertDialog(
+            onDismissRequest = { gitNotice = null },
+            title = { Text("Git") },
+            text = { Text(text, color = HdTextSecondary) },
+            confirmButton = { HdPrimaryButton("Понятно") { gitNotice = null } },
         )
     }
     updateError?.let { text ->
