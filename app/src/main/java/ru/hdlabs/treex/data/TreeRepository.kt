@@ -574,10 +574,29 @@ class TreeRepository(
     suspend fun pushNow(): String {
         pushJob?.cancel()
         val settings = settingsRepository.settings.first()
-        return if (pushToGit(force = true)) {
-            "Древо отправлено в Git: ${settings.githubOwner}/${settings.githubRepo}, файл ${settings.githubPath}"
-        } else {
-            "Git уже совпадает с телефоном"
+        val sync = syncFor(settings)
+        return when (val result = pushToGit(force = true)) {
+            GitPushResult.Uploaded -> {
+                withContext(Dispatchers.IO) {
+                    val remote = sync.fetchForPush()
+                        ?: throw IllegalStateException(
+                            "GitHub не показал файл «${settings.githubPath}» после отправки. " +
+                                "Проверьте токен (право contents) и репозиторий ${settings.githubOwner}/${settings.githubRepo}.",
+                        )
+                    val people = TreeCodec.decode(remote.text).people.size
+                    AppEventLog.info(
+                        "git",
+                        "Push подтверждён: ${settings.githubOwner}/${settings.githubRepo}, $people чел., sha ${remote.sha.take(7)}",
+                    )
+                }
+                "Древо отправлено в Git: ${settings.githubOwner}/${settings.githubRepo}, файл ${settings.githubPath}"
+            }
+            GitPushResult.AlreadySame ->
+                "Git уже совпадает с телефоном — повторная отправка не нужна."
+            GitPushResult.DeferredBecauseLocalChanged ->
+                throw IllegalStateException(
+                    "Древо изменилось во время отправки. Подождите пару секунд и нажмите «Отправить в Git сейчас» ещё раз.",
+                )
         }
     }
 
@@ -668,7 +687,13 @@ class TreeRepository(
         }
     }
 
-    private suspend fun pushToGit(force: Boolean): Boolean {
+    private enum class GitPushResult {
+        Uploaded,
+        AlreadySame,
+        DeferredBecauseLocalChanged,
+    }
+
+    private suspend fun pushToGit(force: Boolean): GitPushResult {
         val settings = settingsRepository.settings.first()
         if (!settings.gitConfigured) throw IllegalStateException("Git не настроен")
         val captured = mutex.withLock { generation to TreeCodec.encode(readLocked()) }
@@ -692,7 +717,7 @@ class TreeRepository(
             val remoteHash = TreeCodec.contentHash(remoteDoc)
             if (remoteHash == localHash) {
                 writeMarker(remote.sha, localHash)
-                return false
+                return GitPushResult.AlreadySame
             }
             val relation = relateGit(localHash, remoteHash, remote.sha, marker?.hash, marker?.sha)
             if (!force && (relation == GitRelation.RemoteNewer || relation == GitRelation.Diverged)) {
@@ -706,7 +731,7 @@ class TreeRepository(
         val stillCurrent = mutex.withLock { generation == captured.first }
         if (!stillCurrent) {
             schedulePush()
-            return false
+            return GitPushResult.DeferredBecauseLocalChanged
         }
         val count = TreeCodec.decode(captured.second).people.size
         val commitMessage = treeGitCommitMessage(settings.userFio(), count)
@@ -716,7 +741,7 @@ class TreeRepository(
         writeMarker(sha, localHash)
         val changedDuringUpload = mutex.withLock { generation != captured.first }
         if (changedDuringUpload) schedulePush()
-        return true
+        return GitPushResult.Uploaded
     }
 
     private fun syncFor(settings: ru.hdlabs.treex.data.settings.AppSettings) = GitHubTreeSync(

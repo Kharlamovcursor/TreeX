@@ -181,6 +181,8 @@ fun DeveloperSettingsScreen(nav: NavHostController) {
     var hydrated by remember { mutableStateOf(false) }
     var progress by remember { mutableStateOf<String?>(null) }
     var gitPushLoading by remember { mutableStateOf(false) }
+    var gitPushDialog by remember { mutableStateOf<String?>(null) }
+    var gitPushResult by remember { mutableStateOf<String?>(null) }
     var telegramBackupLoading by remember { mutableStateOf(false) }
     var gitSaveLoading by remember { mutableStateOf(false) }
     var unlocked by remember { mutableStateOf(false) }
@@ -389,16 +391,26 @@ fun DeveloperSettingsScreen(nav: NavHostController) {
                     gitPushLoading = true
                     progress = "Отправка древа в Git…"
                     try {
-                        message = repo.pushNow()
+                        val result = repo.pushNow()
+                        message = result
+                        gitPushResult = result
+                        gitPushDialog = result
                     } catch (e: CancellationException) {
                         throw e
                     } catch (e: Exception) {
-                        message = e.message ?: "Не удалось отправить в Git"
+                        val text = e.message ?: "Не удалось отправить в Git"
+                        message = text
+                        gitPushResult = text
+                        gitPushDialog = text
+                        AppEventLog.error("git", text, e)
                     } finally {
                         gitPushLoading = false
                         progress = null
                     }
                 }
+            }
+            gitPushResult?.let { text ->
+                Text(text, color = HdOrange, modifier = Modifier.padding(top = 10.dp))
             }
         }
         Spacer(Modifier.height(16.dp))
@@ -476,6 +488,15 @@ fun DeveloperSettingsScreen(nav: NavHostController) {
         }
         if (message.isNotBlank()) Text(message, color = HdTextSecondary, modifier = Modifier.padding(top = 12.dp))
         Text("Версия ${BuildConfig.VERSION_NAME}", color = HdTextSecondary, modifier = Modifier.padding(top = 16.dp, bottom = 24.dp))
+    }
+
+    gitPushDialog?.let { text ->
+        AlertDialog(
+            onDismissRequest = { gitPushDialog = null },
+            title = { Text("Git") },
+            text = { Text(text, color = HdTextSecondary) },
+            confirmButton = { HdPrimaryButton("Понятно") { gitPushDialog = null } },
+        )
     }
 
     if (preview.isNotBlank()) {
