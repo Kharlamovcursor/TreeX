@@ -100,6 +100,31 @@ class TreeLayoutTest {
     }
 
     @Test
+    fun spouseStaysOnSameRowWhenInLawParentAdded() {
+        val people = listOf(
+            PersonEntity(id = "gf", gender = "m", birthDate = "1940-01-01", lastName = "Дед"),
+            PersonEntity(id = "gm", gender = "f", birthDate = "1942-01-01", lastName = "Бабушка"),
+            PersonEntity(id = "f", gender = "m", birthDate = "1965-01-01", fatherId = "gf", motherId = "gm"),
+            PersonEntity(id = "m", gender = "f", birthDate = "1967-01-01"),
+            PersonEntity(id = "self", gender = "m", birthDate = "1990-01-01", fatherId = "f", motherId = "m"),
+            PersonEntity(id = "wife", gender = "f", birthDate = "1991-01-01", motherId = "wm"),
+            PersonEntity(id = "wm", gender = "f", birthDate = "1968-01-01", lastName = "Тёща"),
+        )
+        val unions = listOf(
+            UnionEntity("1", "gf", "gm"),
+            UnionEntity("2", "f", "m"),
+            UnionEntity("3", "self", "wife"),
+        )
+        val placed = TreeLayout.place(people, unions)
+        val card = placed.cards.associateBy { it.id }
+        assertEquals(people.size, card.size)
+        assertEquals(card.getValue("self").top, card.getValue("wife").top, 0.5f)
+        assertTrue(card.getValue("wm").top < card.getValue("wife").top)
+        assertTrue(card.getValue("f").top < card.getValue("self").top)
+        cardsDoNotOverlap(placed.cards)
+    }
+
+    @Test
     fun bridgeKeepsDescendantBelowTheSurvivingPerson() {
         val placed = TreeLayout.place(
             listOf(

@@ -150,6 +150,14 @@ object TreeLayout {
         }
         fun isMarriedIn(id: String): Boolean =
             !hasParents(id) && spouses.getValue(id).any { hasParents(it) }
+        /** Родитель супруга (тёща/тесть): не отдельное дерево сбоку, а цепочка над парой. */
+        fun isInLawOnlyAnchor(id: String): Boolean {
+            val children = people.filter { it.fatherId == id || it.motherId == id }
+            if (children.isEmpty()) return false
+            return children.all { child ->
+                spouses.getValue(child.id).any { mate -> hasParents(mate) }
+            }
+        }
         fun parentsOf(person: PersonEntity): List<String> =
             listOfNotNull(person.fatherId, person.motherId).filter { it in byId && it != person.id }
 
@@ -161,21 +169,24 @@ object TreeLayout {
                 .filter { it !in stackWith }
                 .distinct()
             val above = if (grandparents.isNotEmpty()) buildParentChain(grandparents, stackWith) else null
-            val members = orderMembers(ids, spouses, byId, ::isMarriedIn)
+            val members = orderMembers(ids, spouses, byId)
             return House(ids, members, emptyList(), above)
         }
 
         fun buildHouse(bloodIds: List<String>, stack: Set<String>): House {
             val safe = bloodIds.filter { it !in stack }.distinct()
             if (safe.isEmpty()) return House(bloodIds.distinct(), bloodIds.distinct(), emptyList())
-            val parentChain = if (safe.size == 1) {
-                val parents = parentsOf(byId.getValue(safe.first())).filter { it !in stack }
-                if (parents.isNotEmpty()) buildParentChain(parents, stack + safe) else null
+            val members = orderMembers(safe, spouses, byId)
+            val memberSet = members.toSet()
+            val parentIds = members
+                .flatMap { parentsOf(byId.getValue(it)) }
+                .filter { it !in stack && it !in memberSet }
+                .distinct()
+            val parentChain = if (parentIds.isNotEmpty()) {
+                buildParentChain(parentIds, stack + memberSet)
             } else {
                 null
             }
-            val members = orderMembers(safe, spouses, byId, ::isMarriedIn)
-            val memberSet = members.toSet()
             val nextStack = stack + memberSet
             val natural = people.filter { child ->
                 if (child.id in nextStack) return@filter false
@@ -204,7 +215,7 @@ object TreeLayout {
         val roots = mutableListOf<House>()
         val seen = mutableSetOf<String>()
         val rootBlood = people.map { it.id }
-            .filter { it !in held && !hasParents(it) && !isMarriedIn(it) }
+            .filter { it !in held && !hasParents(it) && !isMarriedIn(it) && !isInLawOnlyAnchor(it) }
             .sortedWith(compareBy({ byId.getValue(it).birthDate }, { byId.getValue(it).lastName }, { it }))
         for (id in rootBlood) {
             if (id in seen) continue
@@ -221,6 +232,7 @@ object TreeLayout {
         }
         val placedIds = mutableSetOf<String>()
         fun collect(house: House) {
+            house.parentChain?.let { collect(it) }
             placedIds.addAll(house.members)
             house.children.forEach { collect(it) }
         }
@@ -254,14 +266,13 @@ object TreeLayout {
         bloodIds: List<String>,
         spouses: Map<String, List<String>>,
         byId: Map<String, PersonEntity>,
-        isMarriedIn: (String) -> Boolean,
     ): List<String> {
         val blood = bloodIds.distinct().sortedWith(
             compareBy({ genderRank(byId.getValue(it).gender) }, { byId.getValue(it).birthDate }, { it }),
         )
         val mates = blood.flatMap { spouses.getValue(it) }
             .distinct()
-            .filter { isMarriedIn(it) && it !in blood }
+            .filter { mate -> mate !in blood && blood.any { person -> mate in spouses.getValue(person) } }
         val used = mutableSetOf<String>()
         val ordered = mutableListOf<String>()
         for (person in blood) {
