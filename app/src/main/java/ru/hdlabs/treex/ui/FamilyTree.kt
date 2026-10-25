@@ -191,7 +191,6 @@ fun FamilyTree(
                     transformOrigin = TransformOrigin(0f, 0f)
                 },
             ) {
-                TreeLinks(placement, Modifier.width(placement.width.dp).height(placement.height.dp))
                 placement.cards.forEach { card ->
                     val person = byId[card.id] ?: return@forEach
                     val selected = person.id == selectedId
@@ -208,6 +207,13 @@ fun FamilyTree(
                         onOpenDetail = { onOpenDetail(person) },
                     )
                 }
+                TreeLinks(
+                    placement,
+                    Modifier
+                        .width(placement.width.dp)
+                        .height(placement.height.dp)
+                        .zIndex(1f),
+                )
                 placement.knots.forEach { knot ->
                     LinkHandle(
                         active = knot.linkId == pendingLinkId,

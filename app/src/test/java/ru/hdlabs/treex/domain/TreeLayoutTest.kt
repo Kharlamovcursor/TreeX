@@ -175,6 +175,8 @@ class TreeLayoutTest {
         assertTrue(abs(wmCenter - wifeCenter) < abs(wmCenter - selfCenter))
         assertTrue(card.getValue("f").top < card.getValue("self").top)
         assertTrue(card.getValue("wm").top < card.getValue("wife").top)
+        assertEquals(card.getValue("f").top, card.getValue("wm").top, 0.5f)
+        assertEquals(card.getValue("m").top, card.getValue("wf").top, 0.5f)
         cardsDoNotOverlap(placed.cards)
         assertTrue(placed.childGroups.none { "f" in it.parentIds && "wm" in it.parentIds })
     }

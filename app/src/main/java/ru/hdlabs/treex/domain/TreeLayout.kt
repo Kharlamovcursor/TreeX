@@ -56,8 +56,12 @@ object TreeLayout {
         }
         return lines
     }
-    fun bands(people: List<PersonEntity>, unions: List<UnionEntity>): List<List<PersonEntity>> {
-        if (people.isEmpty()) return emptyList()
+    fun generationMap(
+        people: List<PersonEntity>,
+        unions: List<UnionEntity>,
+        openLinks: List<OpenLink> = emptyList(),
+    ): Map<String, Int> {
+        if (people.isEmpty()) return emptyMap()
         val byId = people.associateBy { it.id }
         val generation = HashMap<String, Int>()
         val visiting = HashSet<String>()
@@ -111,14 +115,59 @@ object TreeLayout {
                             changed = true
                         }
                     }
+                    else -> {
+                        val shared = maxOf(generationA, generationB)
+                        if (generationA != shared) {
+                            generation[union.partnerAId] = shared
+                            changed = true
+                        }
+                        if (generationB != shared) {
+                            generation[union.partnerBId] = shared
+                            changed = true
+                        }
+                    }
                 }
             }
             if (!changed) break
         }
 
+        var parentPass = 0
+        while (parentPass++ < people.size + 4) {
+            var changed = false
+            people.forEach { person ->
+                val childGen = generation[person.id] ?: return@forEach
+                listOfNotNull(person.fatherId, person.motherId).forEach { parentId ->
+                    if (parentId !in byId) return@forEach
+                    val target = childGen - 1
+                    if ((generation[parentId] ?: 0) < target) {
+                        generation[parentId] = target
+                        changed = true
+                    }
+                }
+            }
+            if (!changed) break
+        }
+
+        openLinks.filter { it.slot == "bridge" && it.anchorIsParent }.forEach { link ->
+            if (link.anchorId !in byId) return@forEach
+            val parentGen = generation.getValue(link.anchorId)
+            link.childIds.filter { it in byId }.forEach { childId ->
+                val next = parentGen + 1
+                if ((generation[childId] ?: 0) < next) {
+                    generation[childId] = next
+                }
+            }
+        }
+
         val minGeneration = generation.values.minOrNull() ?: 0
+        return generation.mapValues { (_, value) -> value - minGeneration }
+    }
+
+    fun bands(people: List<PersonEntity>, unions: List<UnionEntity>): List<List<PersonEntity>> {
+        if (people.isEmpty()) return emptyList()
+        val generation = generationMap(people, unions)
         return people
-            .groupBy { (generation[it.id] ?: 0) - minGeneration }
+            .groupBy { generation[it.id] ?: 0 }
             .toSortedMap()
             .values
             .map { band ->
@@ -126,6 +175,41 @@ object TreeLayout {
                     compareBy({ it.lastName.lowercase() }, { it.firstName.lowercase() }, { it.id }),
                 )
             }
+    }
+
+    private fun alignRowsByGeneration(cards: MutableList<TreeCard>, generation: Map<String, Int>) {
+        if (cards.isEmpty() || generation.isEmpty()) return
+        val byGen = cards.groupBy { generation[it.id] ?: 0 }
+        var y = PAD
+        for (g in byGen.keys.sorted()) {
+            val row = byGen.getValue(g)
+            val rowH = row.maxOf { it.height }
+            row.forEach { card ->
+                val index = cards.indexOfFirst { it.id == card.id }
+                if (index >= 0) {
+                    cards[index] = cards[index].copy(top = y)
+                }
+            }
+            y += rowH + ROW_GAP
+        }
+        resolveHorizontalOverlaps(cards, generation)
+    }
+
+    private fun resolveHorizontalOverlaps(cards: MutableList<TreeCard>, generation: Map<String, Int>) {
+        val byGen = cards.groupBy { generation[it.id] ?: 0 }
+        byGen.values.forEach { row ->
+            if (row.size < 2) return@forEach
+            val ordered = row.sortedBy { it.left }.map { it.id }
+            for (index in 1 until ordered.size) {
+                val prev = cards.first { it.id == ordered[index - 1] }
+                val currIndex = cards.indexOfFirst { it.id == ordered[index] }
+                val curr = cards[currIndex]
+                val minLeft = prev.left + CARD_W + SPOUSE_GAP
+                if (curr.left < minLeft - 0.1f) {
+                    cards[currIndex] = curr.copy(left = minLeft)
+                }
+            }
+        }
     }
 
     fun place(
@@ -281,6 +365,7 @@ object TreeLayout {
             position(house, cursor, PAD, cards, cardIds, childGroups, byId, heights, openLinks)
             cursor += house.width + HOUSE_GAP
         }
+        alignRowsByGeneration(cards, generationMap(people, unions, openLinks))
         val spouseLinks = unions.mapNotNull { union ->
             if (union.partnerAId in byId && union.partnerBId in byId && union.partnerAId != union.partnerBId) {
                 union.partnerAId to union.partnerBId
