@@ -10,6 +10,15 @@ class PersonDisplayTest {
     @Test
     fun formatCardDateUsesRussianPattern() {
         assertEquals("15.03.1988", formatCardDate("1988-03-15"))
+        assertEquals("16.04.1987", formatCardDate("1987-04-16"))
+        assertEquals("16.04.1987", formatCardDate("16.04.1987"))
+        assertEquals("01.01.1985", formatCardDate("1985"))
+    }
+
+    @Test
+    fun yearsLabelOnCardWithoutBirthPrefix() {
+        val person = PersonEntity(id = "p", birthDate = "1987-04-16")
+        assertEquals("16.04.1987", person.yearsLabel())
     }
 
     @Test

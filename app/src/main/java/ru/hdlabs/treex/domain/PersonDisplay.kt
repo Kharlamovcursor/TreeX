@@ -41,9 +41,7 @@ fun PersonEntity.yearsLabel(): String {
 fun formatCardDate(value: String): String? {
     val trimmed = value.trim()
     if (trimmed.isBlank()) return null
-    parseIsoDate(trimmed)?.let { return it.format(CARD_DATE) }
-    val year = yearOf(trimmed)
-    return year?.let { "р. $it" }
+    return parseStoredDate(trimmed)?.format(CARD_DATE)
 }
 
 fun acceptsAsParent(slot: String, candidate: PersonEntity): Boolean = when (slot) {
@@ -59,10 +57,10 @@ fun PersonEntity.lifeLine(today: LocalDate = LocalDate.now()): String {
 }
 
 fun PersonEntity.ageLabel(today: LocalDate = LocalDate.now()): String {
-    val birth = parseIsoDate(birthDate) ?: return ""
+    val birth = parseStoredDate(birthDate) ?: return ""
     val end = when {
         deathDate.isBlank() -> today
-        else -> parseIsoDate(deathDate) ?: return ""
+        else -> parseStoredDate(deathDate) ?: return ""
     }
     if (end.isBefore(birth)) return ""
     val years = Period.between(birth, end).years
@@ -113,11 +111,34 @@ private fun ageWord(years: Int): String {
 
 private val CARD_DATE: DateTimeFormatter = DateTimeFormatter.ofPattern("dd.MM.yyyy")
 
-private fun parseIsoDate(value: String): LocalDate? = try {
-    val match = Regex("""^(\d{4})-(\d{2})-(\d{2})""").find(value.trim()) ?: return null
-    LocalDate.of(match.groupValues[1].toInt(), match.groupValues[2].toInt(), match.groupValues[3].toInt())
-} catch (_: DateTimeParseException) {
-    null
+fun parseStoredDate(value: String): LocalDate? {
+    val trimmed = value.trim()
+    if (trimmed.isBlank()) return null
+    return try {
+        when {
+            Regex("""^\d{4}$""").matches(trimmed) ->
+                LocalDate.of(trimmed.toInt(), 1, 1)
+            else -> {
+                Regex("""^(\d{4})-(\d{1,2})-(\d{1,2})""").find(trimmed)?.let { match ->
+                    LocalDate.of(
+                        match.groupValues[1].toInt(),
+                        match.groupValues[2].toInt(),
+                        match.groupValues[3].toInt(),
+                    )
+                } ?: Regex("""^(\d{1,2})\.(\d{1,2})\.(\d{4})""").find(trimmed)?.let { match ->
+                    LocalDate.of(
+                        match.groupValues[3].toInt(),
+                        match.groupValues[2].toInt(),
+                        match.groupValues[1].toInt(),
+                    )
+                }
+            }
+        }
+    } catch (_: DateTimeParseException) {
+        null
+    } catch (_: IllegalArgumentException) {
+        null
+    }
 }
 
 fun yearOf(value: String): String? = Regex("""(\d{4})""").find(value)?.groupValues?.get(1)

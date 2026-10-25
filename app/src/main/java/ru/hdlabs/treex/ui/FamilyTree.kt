@@ -76,7 +76,7 @@ import ru.hdlabs.treex.domain.TreePlacement
 import ru.hdlabs.treex.diagnostic.AppEventLog
 import ru.hdlabs.treex.domain.fullName
 import ru.hdlabs.treex.domain.isVacantSlot
-import ru.hdlabs.treex.domain.lifeLine
+import ru.hdlabs.treex.domain.yearsLabel
 import ru.hdlabs.treex.ui.theme.HdBlue
 import ru.hdlabs.treex.ui.theme.HdOrange
 import ru.hdlabs.treex.ui.theme.HdPanelElevated
@@ -408,9 +408,9 @@ private fun TreeNode(
                         maxLines = 3,
                         overflow = TextOverflow.Ellipsis,
                     )
-                    val years = person.lifeLine()
-                    if (years.isNotBlank()) {
-                        Text(years, color = HdTextSecondary, fontSize = 12.sp, textAlign = TextAlign.Center)
+                    val dates = person.yearsLabel()
+                    if (dates.isNotBlank()) {
+                        Text(dates, color = HdTextSecondary, fontSize = 12.sp, textAlign = TextAlign.Center)
                     }
                     if (detachedBranch) {
                         Text("отд. ветка", color = HdOrange, fontSize = 10.sp, textAlign = TextAlign.Center)
