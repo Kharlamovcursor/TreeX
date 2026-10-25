@@ -46,6 +46,8 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalConfiguration
+import android.content.res.Configuration
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.platform.LocalContext
@@ -113,6 +115,11 @@ fun TreeScreen(nav: NavHostController, highlight: String) {
     var showBranchConnectModes by remember { mutableStateOf(false) }
     var pendingBranchConnect by remember { mutableStateOf<Pair<String, BranchConnectMode>?>(null) }
     var actionsExpanded by rememberSaveable { mutableStateOf(false) }
+    val landscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
+
+    LaunchedEffect(landscape) {
+        if (landscape) actionsExpanded = false
+    }
 
     LaunchedEffect(settings.gitConfigured, state.people.size) {
         if (settings.gitConfigured && state.people.isEmpty()) {
@@ -165,6 +172,7 @@ fun TreeScreen(nav: NavHostController, highlight: String) {
         title = "Древо by HDLabs",
         titleContent = { HdLabsBrandTitle() },
         scroll = false,
+        minimalTopBar = landscape,
         progressMessage = if (refreshing) "Обновление из Git…" else null,
         actions = {
             IconButton(onClick = {
@@ -221,46 +229,50 @@ fun TreeScreen(nav: NavHostController, highlight: String) {
         },
     ) {
         Column(Modifier.fillMaxSize()) {
-            if (state.people.isNotEmpty()) {
-                Text(
-                    if (livingCount == state.people.size) {
-                        "В древе $livingCount чел."
-                    } else {
-                        "В древе $livingCount чел., пустых мест ${state.people.size - livingCount}"
-                    },
-                    color = HdTextSecondary,
-                )
-            }
-            if (syncNote != null) {
-                Text(syncNote.orEmpty(), color = HdOrange, modifier = Modifier.padding(top = 4.dp))
-            }
-            if (detachedBranchIds.isNotEmpty()) {
-                Text(
-                    "Отдельных веток: ${treeComponentsCount(state, detachedBranchIds)}",
-                    color = HdOrange,
-                    modifier = Modifier.padding(top = 4.dp),
-                )
-            }
-            pendingBranchConnect?.let { (subjectId, mode) ->
-                val subjectName = state.people.find { it.id == subjectId }?.fullName() ?: "Карточка"
-                Spacer(Modifier.height(4.dp))
-                Text(
-                    "«$subjectName»: ${branchConnectPrompt(mode)}. Тапните карточку на основном древе.",
-                    color = HdOrange,
-                )
-                HdSecondaryButton("Отменить связывание") { pendingBranchConnect = null }
-            }
-            if (state.people.isNotEmpty()) {
-                Spacer(Modifier.height(6.dp))
-                HdTextField(query, { query = it }, "Поиск")
-                if (query.isBlank()) {
+            if (!landscape) {
+                if (state.people.isNotEmpty()) {
+                    Text(
+                        if (livingCount == state.people.size) {
+                            "В древе $livingCount чел."
+                        } else {
+                            "В древе $livingCount чел., пустых мест ${state.people.size - livingCount}"
+                        },
+                        color = HdTextSecondary,
+                    )
+                }
+                if (syncNote != null) {
+                    Text(syncNote.orEmpty(), color = HdOrange, modifier = Modifier.padding(top = 4.dp))
+                }
+                if (detachedBranchIds.isNotEmpty()) {
+                    Text(
+                        "Отдельных веток: ${treeComponentsCount(state, detachedBranchIds)}",
+                        color = HdOrange,
+                        modifier = Modifier.padding(top = 4.dp),
+                    )
+                }
+                pendingBranchConnect?.let { (subjectId, mode) ->
+                    val subjectName = state.people.find { it.id == subjectId }?.fullName() ?: "Карточка"
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        "«$subjectName»: ${branchConnectPrompt(mode)}. Тапните карточку на основном древе.",
+                        color = HdOrange,
+                    )
+                    HdSecondaryButton("Отменить связывание") { pendingBranchConnect = null }
+                }
+                if (state.people.isNotEmpty()) {
                     Spacer(Modifier.height(6.dp))
-                    HdSecondaryButton("Отдельная ветка") {
-                        nav.navigate(Routes.edit("new", "branch", ""))
+                    HdTextField(query, { query = it }, "Поиск")
+                    if (query.isBlank()) {
+                        Spacer(Modifier.height(6.dp))
+                        HdSecondaryButton("Отдельная ветка") {
+                            nav.navigate(Routes.edit("new", "branch", ""))
+                        }
                     }
                 }
+                Spacer(Modifier.height(4.dp))
+            } else if (pendingBranchConnect != null) {
+                HdSecondaryButton("Отменить связывание") { pendingBranchConnect = null }
             }
-            Spacer(Modifier.height(4.dp))
             when {
                 state.people.isEmpty() -> EmptyTree(
                     gitConfigured = settings.gitConfigured,
@@ -358,7 +370,7 @@ fun TreeScreen(nav: NavHostController, highlight: String) {
                         onOpenDetail = { nav.navigate(Routes.person(it.id)) },
                         onHoldLink = { pendingLinkId = it },
                     )
-                    if (focus != null) {
+                    if (focus != null && !landscape) {
                         if (actionsExpanded) {
                             FocusActionPanel(
                                 focus = focus,

@@ -123,7 +123,11 @@ class TreeRepository(
                 val named = merged.firstName.isNotBlank() || merged.lastName.isNotBlank() || merged.middleName.isNotBlank()
                 val clean = merged.copy(
                     lastName = capitalizePersonName(merged.lastName),
-                    birthLastName = capitalizePersonName(merged.birthLastName),
+                    birthLastName = if (merged.gender == "f") {
+                        capitalizePersonName(merged.birthLastName)
+                    } else {
+                        ""
+                    },
                     firstName = capitalizePersonName(merged.firstName),
                     middleName = capitalizePersonName(merged.middleName),
                     fatherId = fatherId,

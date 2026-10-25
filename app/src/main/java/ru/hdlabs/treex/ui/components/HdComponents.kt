@@ -311,6 +311,7 @@ fun HdScaffold(
     floating: @Composable () -> Unit = {},
     scroll: Boolean = true,
     progressMessage: String? = null,
+    minimalTopBar: Boolean = false,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     androidx.compose.foundation.layout.Box(Modifier.fillMaxSize()) {
@@ -321,7 +322,9 @@ fun HdScaffold(
             topBar = {
                 TopAppBar(
                     title = {
-                        if (titleContent != null) {
+                        if (minimalTopBar) {
+                            Text("")
+                        } else if (titleContent != null) {
                             titleContent()
                         } else {
                             Text(title, color = HdTextPrimary)

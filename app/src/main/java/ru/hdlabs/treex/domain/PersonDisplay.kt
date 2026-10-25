@@ -11,7 +11,11 @@ fun PersonEntity.isVacantSlot(): Boolean = vacant
 
 fun PersonEntity.fullName(): String {
     if (vacant) return "Пустое место"
-    val surname = if (birthLastName.isNotBlank() && !birthLastName.equals(lastName, ignoreCase = true)) {
+    val surname = if (
+        gender == "f" &&
+        birthLastName.isNotBlank() &&
+        !birthLastName.equals(lastName, ignoreCase = true)
+    ) {
         "$lastName ($birthLastName)"
     } else {
         lastName

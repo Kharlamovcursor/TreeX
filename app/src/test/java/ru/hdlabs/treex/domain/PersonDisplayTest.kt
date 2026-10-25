@@ -22,6 +22,14 @@ class PersonDisplayTest {
     }
 
     @Test
+    fun maidenNameShownOnlyForWomen() {
+        val man = PersonEntity(id = "m", gender = "m", lastName = "Иванов", birthLastName = "Петров", firstName = "Иван")
+        val woman = PersonEntity(id = "f", gender = "f", lastName = "Иванова", birthLastName = "Петрова", firstName = "Мария")
+        assertEquals("Иванов Иван", man.fullName())
+        assertEquals("Иванова (Петрова) Мария", woman.fullName())
+    }
+
+    @Test
     fun acceptsAsParentByGender() {
         val man = PersonEntity(id = "m", gender = "m", firstName = "Иван")
         val woman = PersonEntity(id = "f", gender = "f", firstName = "Мария")

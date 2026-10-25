@@ -404,7 +404,9 @@ fun PersonEditorScreen(routeId: String, role: String, anchor: String, nav: NavHo
                 }
                 Spacer(Modifier.height(8.dp))
                 HdTextField(lastName, { buffer.mark("lastName"); lastName = it }, "Фамилия")
-                HdTextField(birthLastName, { buffer.mark("birthLastName"); birthLastName = it }, "Девичья фамилия")
+                if (gender == "f") {
+                    HdTextField(birthLastName, { buffer.mark("birthLastName"); birthLastName = it }, "Девичья фамилия")
+                }
                 HdTextField(firstName, { buffer.mark("firstName"); firstName = it }, "Имя")
                 HdTextField(middleName, { middleTouched = true; buffer.mark("middleName"); middleName = it }, "Отчество")
                 if (duplicate) Text("Такое ФИО уже есть в древе", color = HdOrange, modifier = Modifier.padding(top = 4.dp))
