@@ -394,6 +394,11 @@ object TreeLayout {
             }
             membersTop = top + maxAbove + ROW_GAP
         }
+        if (house.parentChain != null || house.memberParentChains.isNotEmpty()) {
+            house.members.forEach { memberId ->
+                linkMemberToParents(memberId, byId, childGroups)
+            }
+        }
         val memberRowH = siblingRowHeight ?: uniformRowHeight(house.members, heights)
         house.members.forEachIndexed { index, id ->
             if (cardIds.add(id)) {
@@ -441,6 +446,25 @@ object TreeLayout {
                 val childIds = link.childIds.filter { id -> cards.any { it.id == id } }
                 if (childIds.isNotEmpty()) childGroups.add(ChildGroup(listOf(link.anchorId), childIds, open = true))
             }
+        }
+    }
+
+    private fun linkMemberToParents(
+        memberId: String,
+        byId: Map<String, PersonEntity>,
+        childGroups: MutableList<ChildGroup>,
+    ) {
+        val person = byId[memberId] ?: return
+        val parents = listOfNotNull(person.fatherId, person.motherId)
+            .filter { it in byId && it != memberId }
+            .distinct()
+            .sorted()
+        if (parents.isEmpty()) return
+        val duplicate = childGroups.any { group ->
+            group.childIds == listOf(memberId) && group.parentIds.sorted() == parents
+        }
+        if (!duplicate) {
+            childGroups.add(ChildGroup(parents, listOf(memberId)))
         }
     }
 

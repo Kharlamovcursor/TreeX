@@ -30,6 +30,20 @@ class PersonDisplayTest {
     }
 
     @Test
+    fun suggestedParentFamilyNameUsesMaidenForWomen() {
+        val woman = PersonEntity(
+            id = "w",
+            gender = "f",
+            lastName = "Харламова",
+            birthLastName = "Лымарь",
+            firstName = "Елизавета",
+        )
+        val man = PersonEntity(id = "m", gender = "m", lastName = "Харламов", firstName = "Яков")
+        assertEquals("Лымарь", suggestedParentFamilyName(woman))
+        assertEquals("Харламов", suggestedParentFamilyName(man))
+    }
+
+    @Test
     fun acceptsAsParentByGender() {
         val man = PersonEntity(id = "m", gender = "m", firstName = "Иван")
         val woman = PersonEntity(id = "f", gender = "f", firstName = "Мария")

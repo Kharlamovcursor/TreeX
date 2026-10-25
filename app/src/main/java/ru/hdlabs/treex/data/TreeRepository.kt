@@ -34,6 +34,7 @@ import ru.hdlabs.treex.domain.linksAfterRemoval
 import ru.hdlabs.treex.domain.reattachPeople
 import ru.hdlabs.treex.domain.reattachSpouse
 import ru.hdlabs.treex.domain.transferVacantSlot
+import ru.hdlabs.treex.domain.mergeInferredParentUnions
 import ru.hdlabs.treex.domain.stableUnionId
 import ru.hdlabs.treex.domain.SpouseDraft
 import ru.hdlabs.treex.domain.TreeRules
@@ -101,6 +102,23 @@ class TreeRepository(
     }
 
     suspend fun person(id: String): PersonEntity? = peopleDao.get(id)
+
+    /** Добавляет союзы между отцом и матерью, если у ребёнка указаны оба родителя, а брака в базе нет. */
+    suspend fun reconcileParentUnions() {
+        mutex.withLock {
+            database.withTransaction {
+                val people = peopleDao.all()
+                val current = unionDao.all()
+                val merged = mergeInferredParentUnions(current, people)
+                if (merged.size != current.size) {
+                    unionDao.deleteAll()
+                    unionDao.upsertAll(merged)
+                    generation += 1
+                    schedulePush()
+                }
+            }
+        }
+    }
 
     suspend fun savePerson(
         person: PersonEntity,
@@ -193,8 +211,9 @@ class TreeRepository(
                         val b = maxOf(clean.id, spouse.personId)
                         UnionEntity("u-$a-$b", a, b, spouse.marriedOn.trim())
                     }
+                    val unionsWithParents = mergeInferredParentUnions(kept + created, peopleDao.all())
                     unionDao.deleteAll()
-                    unionDao.upsertAll(kept + created)
+                    unionDao.upsertAll(unionsWithParents)
                     generation += 1
                     if (snapshot) snapshotLocked(readLocked())
                     true

@@ -106,6 +106,9 @@ fun TreeNavHost() {
             }
         }
         launch {
+            runCatching { app.container.treeRepository.reconcileParentUnions() }
+        }
+        launch {
             val git = runCatching { app.container.treeRepository.syncTreeFromGitIfNeeded() }
                 .onFailure { error ->
                     AppEventLog.error("git", "Сбой синхронизации при запуске", error)

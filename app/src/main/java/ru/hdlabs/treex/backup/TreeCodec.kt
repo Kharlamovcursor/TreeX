@@ -3,6 +3,7 @@ package ru.hdlabs.treex.backup
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import ru.hdlabs.treex.domain.capitalizePersonName
+import ru.hdlabs.treex.domain.stableUnionId
 import java.security.MessageDigest
 
 object TreeCodec {
@@ -71,11 +72,23 @@ object TreeCodec {
                 same.first().copy(marriedOn = same.firstOrNull { it.marriedOn.isNotBlank() }?.marriedOn.orEmpty())
             }
             .sortedBy { it.id }
+        val unionKeys = unions.map { it.partnerAId to it.partnerBId }.toMutableSet()
+        val inferred = people.mapNotNull { person ->
+            val fatherId = person.fatherId ?: return@mapNotNull null
+            val motherId = person.motherId ?: return@mapNotNull null
+            if (fatherId == motherId) return@mapNotNull null
+            val a = minOf(fatherId, motherId)
+            val b = maxOf(fatherId, motherId)
+            if (a to b in unionKeys) return@mapNotNull null
+            unionKeys.add(a to b)
+            UnionRecord(stableUnionId(a, b), a, b)
+        }
+        val allUnions = (unions + inferred).sortedBy { it.id }
         return doc.copy(
             format = TreeDocument.FORMAT,
             version = TreeDocument.VERSION,
             people = people,
-            unions = unions,
+            unions = allUnions,
         )
     }
 

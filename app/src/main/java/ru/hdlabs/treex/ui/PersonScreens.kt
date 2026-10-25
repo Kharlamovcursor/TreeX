@@ -73,6 +73,7 @@ import ru.hdlabs.treex.domain.halfSiblingCaption
 import ru.hdlabs.treex.domain.siblingGroupsOf
 import ru.hdlabs.treex.domain.spouseNoun
 import ru.hdlabs.treex.domain.suggestPatronymic
+import ru.hdlabs.treex.domain.suggestedParentFamilyName
 import ru.hdlabs.treex.navigation.Routes
 import ru.hdlabs.treex.ui.components.HdCard
 import ru.hdlabs.treex.ui.components.HdPrimaryButton
@@ -210,7 +211,7 @@ fun PersonEditorScreen(routeId: String, role: String, anchor: String, nav: NavHo
         when (role) {
             "father" -> {
                 if (lastName.isBlank()) {
-                    lastName = host.lastName
+                    lastName = suggestedParentFamilyName(host)
                     buffer.mark("lastName")
                 }
                 if (gender == "u") {
@@ -220,7 +221,7 @@ fun PersonEditorScreen(routeId: String, role: String, anchor: String, nav: NavHo
             }
             "mother" -> {
                 if (lastName.isBlank()) {
-                    lastName = host.lastName
+                    lastName = suggestedParentFamilyName(host)
                     buffer.mark("lastName")
                 }
                 if (gender == "u") {
@@ -369,8 +370,12 @@ fun PersonEditorScreen(routeId: String, role: String, anchor: String, nav: NavHo
             "Карточка появится отдельно на древе. Развивайте ветку родителями, детьми и супругами. " +
                 "Связать с основным древом можно с экрана древа — «Связать с основным древом»."
         !creating || host == null -> ""
-        role == "father" -> "Это отец для ${host.fullName()}. Фамилия подставится сама."
-        role == "mother" -> "Это мать для ${host.fullName()}. Фамилия подставится сама."
+        role == "father" && host.gender == "f" ->
+            "Это отец для ${host.fullName()}. Подставится девичья фамилия (${suggestedParentFamilyName(host).ifBlank { "—" }})."
+        role == "mother" && host.gender == "f" ->
+            "Это мать для ${host.fullName()}. Подставится девичья фамилия (${suggestedParentFamilyName(host).ifBlank { "—" }})."
+        role == "father" -> "Это отец для ${host.fullName()}. Подставится фамилия ${host.lastName.ifBlank { "—" }}."
+        role == "mother" -> "Это мать для ${host.fullName()}. Подставится фамилия ${host.lastName.ifBlank { "—" }}."
         role == "spouse" && host.gender == "m" -> "Это супруга для ${host.fullName()}."
         role == "spouse" -> "Это супруг для ${host.fullName()}."
         role == "child" -> "Это ребёнок для ${host.fullName()}. Фамилия и отчество подставятся сами."

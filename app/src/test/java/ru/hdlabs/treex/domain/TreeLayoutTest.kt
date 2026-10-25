@@ -125,6 +125,27 @@ class TreeLayoutTest {
     }
 
     @Test
+    fun inLawParentsLinkToDaughterWithoutSharedChildHouse() {
+        val people = listOf(
+            PersonEntity(id = "self", gender = "m", birthDate = "1990-01-01"),
+            PersonEntity(id = "wife", gender = "f", birthDate = "1991-01-01", fatherId = "wf", motherId = "wm"),
+            PersonEntity(id = "wf", gender = "m", birthDate = "1966-01-01", lastName = "Тесть"),
+            PersonEntity(id = "wm", gender = "f", birthDate = "1968-01-01", lastName = "Тёща"),
+        )
+        val unions = listOf(
+            UnionEntity("1", "self", "wife"),
+            UnionEntity("2", "wf", "wm"),
+        )
+        val placed = TreeLayout.place(people, unions)
+        assertTrue(
+            placed.childGroups.any { group ->
+                "wife" in group.childIds && "wf" in group.parentIds && "wm" in group.parentIds
+            },
+        )
+        assertTrue(placed.spouseLinks.any { it.first == "wf" && it.second == "wm" || it.first == "wm" && it.second == "wf" })
+    }
+
+    @Test
     fun bothSpousesParentsSplitAboveEachColumn() {
         val people = listOf(
             PersonEntity(id = "gf", gender = "m", birthDate = "1940-01-01"),
