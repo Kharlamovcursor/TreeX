@@ -35,11 +35,9 @@ class GitHubTreeSync(
         return fetchFromRecentCommits(lenientEmptyRepo = false)
     }
 
-    /** Перед отправкой: пустой репозиторий считаем «файла ещё нет», push создаст первый коммит. */
-    fun fetchForPush(): RemoteFile? {
-        fetchRef(branch, missingIsNull = true, lenientEmptyRepo = true)?.let { return it }
-        return fetchFromRecentCommits(lenientEmptyRepo = true)
-    }
+    /** Только актуальный файл на ветке (без старых коммитов) — для push и проверки после отправки. */
+    fun fetchForPush(): RemoteFile? =
+        fetchRef(branch, missingIsNull = true, lenientEmptyRepo = true)
 
     fun fetchExact(ref: String): RemoteFile =
         fetchRef(ref, missingIsNull = false, lenientEmptyRepo = false)

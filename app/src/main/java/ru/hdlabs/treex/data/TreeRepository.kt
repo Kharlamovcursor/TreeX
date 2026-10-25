@@ -707,21 +707,32 @@ class TreeRepository(
         val localHash = TreeCodec.contentHash(localDoc)
         val marker = readMarker()
         if (remote != null) {
-            val remoteDoc = TreeCodec.decode(remote.text)
-            val remoteCount = remoteDoc.people.size
-            if (remoteCount > 0 && localCount < remoteCount && !force) {
-                throw IllegalStateException(
-                    "В Git $remoteCount чел., на телефоне $localCount. Сначала загрузите древо из Git — иначе можно стереть семейные данные.",
-                )
-            }
-            val remoteHash = TreeCodec.contentHash(remoteDoc)
-            if (remoteHash == localHash) {
-                writeMarker(remote.sha, localHash)
-                return GitPushResult.AlreadySame
-            }
-            val relation = relateGit(localHash, remoteHash, remote.sha, marker?.hash, marker?.sha)
-            if (!force && (relation == GitRelation.RemoteNewer || relation == GitRelation.Diverged)) {
-                throw IllegalStateException("В Git другая версия. На главном экране нажмите обновление и выберите: загрузить Git или отправить телефон.")
+            val remoteDoc = runCatching { TreeCodec.decode(remote.text) }.getOrNull()
+            if (remoteDoc == null) {
+                if (!force) {
+                    throw IllegalStateException(
+                        "В Git лежит файл «${settings.githubPath}» не формата HDLabs. " +
+                            "В настройках разработчика нажмите «Отправить в Git сейчас», чтобы заменить его.",
+                    )
+                }
+            } else {
+                val remoteCount = remoteDoc.people.size
+                if (remoteCount > 0 && localCount < remoteCount && !force) {
+                    throw IllegalStateException(
+                        "В Git $remoteCount чел., на телефоне $localCount. Сначала загрузите древо из Git — иначе можно стереть семейные данные.",
+                    )
+                }
+                val remoteHash = TreeCodec.contentHash(remoteDoc)
+                if (remoteHash == localHash) {
+                    writeMarker(remote.sha, localHash)
+                    return GitPushResult.AlreadySame
+                }
+                val relation = relateGit(localHash, remoteHash, remote.sha, marker?.hash, marker?.sha)
+                if (!force && (relation == GitRelation.RemoteNewer || relation == GitRelation.Diverged)) {
+                    throw IllegalStateException(
+                        "В Git другая версия. На главном экране нажмите обновление и выберите: загрузить Git или отправить телефон.",
+                    )
+                }
             }
         } else if (!force) {
             throw IllegalStateException(

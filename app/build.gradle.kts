@@ -28,9 +28,9 @@ android {
         applicationId = "ru.hdlabs.treex"
         minSdk = 28
         targetSdk = 35
-        // 1.0.20 = 1*10000 + 0*100 + 20. Тег релиза: v1.0.20.
-        versionCode = 10020
-        versionName = "1.0.20"
+        // 1.0.21 = 1*10000 + 0*100 + 21. Тег релиза: v1.0.21.
+        versionCode = 10021
+        versionName = "1.0.21"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
