@@ -331,7 +331,46 @@ class TreeLayoutTest {
             val center = card.getValue(id).left + TreeLayout.CARD_W / 2f
             assertTrue("$id is outside Yakov and Elizaveta", center in coupleLeft..coupleRight)
         }
-        assertTrue(card.getValue("ivan").left > card.getValue("yakov").left)
+        assertTrue(sdKidsMid > card.getValue("yakov").left + TreeLayout.CARD_W / 2f)
+        cardsDoNotOverlap(placed.cards)
+    }
+
+    @Test
+    fun addedFatherSitsAboveDaughterWithoutMovingOtherBranches() {
+        val people = listOf(
+            PersonEntity(id = "pavlov", gender = "m", birthDate = "1932-01-01", lastName = "Павлов", firstName = "Николай"),
+            PersonEntity(id = "le", gender = "m", birthDate = "1960-05-30"),
+            PersonEntity(id = "li", gender = "f", birthDate = "1960-05-30"),
+            PersonEntity(id = "hv", gender = "m", birthDate = "1957-02-11"),
+            PersonEntity(id = "hg", gender = "f", birthDate = "1957-03-15", fatherId = "pavlov"),
+            PersonEntity(id = "andrey", gender = "m", birthDate = "1965-01-01", fatherId = "le", motherId = "li"),
+            PersonEntity(id = "yakov", gender = "m", birthDate = "1967-04-16", fatherId = "hv", motherId = "hg"),
+            PersonEntity(id = "elizaveta", gender = "f", birthDate = "1968-10-17", fatherId = "le", motherId = "li"),
+            PersonEntity(id = "dmitry", gender = "m", birthDate = "1976-05-14"),
+            PersonEntity(id = "svetlana", gender = "f", birthDate = "1982-03-24", fatherId = "hv", motherId = "hg"),
+            PersonEntity(id = "maxim", gender = "m", birthDate = "2024-10-03", fatherId = "yakov", motherId = "elizaveta"),
+            PersonEntity(id = "ivan", gender = "m", birthDate = "2006-05-29", fatherId = "dmitry", motherId = "svetlana"),
+        )
+        val unions = listOf(
+            UnionEntity("1", "le", "li"),
+            UnionEntity("2", "hv", "hg"),
+            UnionEntity("3", "yakov", "elizaveta"),
+            UnionEntity("4", "dmitry", "svetlana"),
+        )
+        val placed = TreeLayout.place(people, unions)
+        val card = placed.cards.associateBy { it.id }
+        assertTrue(card.getValue("pavlov").top < card.getValue("hg").top)
+        assertEquals(card.getValue("le").top, card.getValue("hg").top, 0.5f)
+        assertEquals(card.getValue("andrey").top, card.getValue("elizaveta").top, 0.5f)
+        assertEquals(card.getValue("elizaveta").top, card.getValue("svetlana").top, 0.5f)
+        assertTrue(card.getValue("andrey").left < card.getValue("elizaveta").left)
+        assertTrue(card.getValue("yakov").left < card.getValue("svetlana").left)
+        assertSpousesAdjacent("elizaveta", "yakov", card)
+        assertSpousesAdjacent("svetlana", "dmitry", card)
+        val galinaCenter = card.getValue("hg").left + TreeLayout.CARD_W / 2f
+        val lymarCenter = (card.getValue("le").left + card.getValue("li").left) / 2f + TreeLayout.CARD_W / 2f
+        val pavlovCenter = card.getValue("pavlov").left + TreeLayout.CARD_W / 2f
+        assertTrue(abs(pavlovCenter - galinaCenter) < abs(pavlovCenter - lymarCenter))
         cardsDoNotOverlap(placed.cards)
     }
 

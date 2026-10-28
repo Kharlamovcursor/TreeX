@@ -34,6 +34,30 @@ private fun siblingKind(person: PersonEntity, other: PersonEntity): SiblingKind 
     }
 }
 
+/**
+ * Кому ещё проставить нового родителя: только братьям и сёстрам с тем же уже известным вторым родителем.
+ * Если второго родителя нет, никого больше не трогаем — иначе отец запишется всем людям без родителей.
+ */
+fun siblingsMissingParent(
+    people: List<PersonEntity>,
+    anchor: PersonEntity,
+    newParentId: String,
+    asFather: Boolean,
+): List<PersonEntity> {
+    val sharedOther = if (asFather) anchor.motherId else anchor.fatherId
+    if (sharedOther.isNullOrBlank()) return emptyList()
+    return people.filter { person ->
+        person.id != anchor.id &&
+            person.id != newParentId &&
+            !person.vacant &&
+            if (asFather) {
+                person.fatherId == null && person.motherId == sharedOther
+            } else {
+                person.motherId == null && person.fatherId == sharedOther
+            }
+    }
+}
+
 fun halfSiblingCaption(person: PersonEntity, other: PersonEntity): String {
     val sharesFather = person.fatherId != null && person.fatherId == other.fatherId
     val sharesMother = person.motherId != null && person.motherId == other.motherId

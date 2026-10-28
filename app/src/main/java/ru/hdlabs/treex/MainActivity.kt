@@ -28,4 +28,9 @@ class MainActivity : ComponentActivity() {
         super.onResume()
         InstallHelper.resumePendingInstall(this)
     }
+
+    override fun onUserLeaveHint() {
+        super.onUserLeaveHint()
+        (application as TreeXApplication).leaveHint.tryEmit(Unit)
+    }
 }

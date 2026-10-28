@@ -38,6 +38,7 @@ import ru.hdlabs.treex.domain.mergeInferredParentUnions
 import ru.hdlabs.treex.domain.stableUnionId
 import ru.hdlabs.treex.domain.SpouseDraft
 import ru.hdlabs.treex.domain.TreeRules
+import ru.hdlabs.treex.domain.siblingsMissingParent
 import ru.hdlabs.treex.domain.mergePerson
 import ru.hdlabs.treex.domain.mergeSpouseDrafts
 import ru.hdlabs.treex.domain.spouseDraftsOf
@@ -56,7 +57,6 @@ import ru.hdlabs.treex.sync.relateGit
 import java.io.File
 import java.time.Instant
 import java.time.ZoneId
-import java.time.format.DateTimeFormatter
 
 data class TreeState(
     val people: List<PersonEntity> = emptyList(),
@@ -89,10 +89,13 @@ class TreeRepository(
     private val peopleDao = database.personDao()
     private val unionDao = database.unionDao()
     private val mutex = Mutex()
+    private val gitMutex = Mutex()
     private var generation = 0
     private var pushJob: Job? = null
     private val syncNoteState = MutableStateFlow<String?>(null)
     val syncNote: StateFlow<String?> = syncNoteState
+    private val pendingUploadState = MutableStateFlow(false)
+    val pendingUpload: StateFlow<Boolean> = pendingUploadState
     private val linkJson = Json { ignoreUnknownKeys = true; encodeDefaults = true }
     private val openLinksState = MutableStateFlow(loadOpenLinks())
     val openLinks: StateFlow<List<OpenLink>> = openLinksState
@@ -213,37 +216,19 @@ class TreeRepository(
                         ),
                     )
                     if (linkRole == "father" && anchor != null) {
-                        val oldFather = anchor.fatherId
-                        val oldMother = anchor.motherId
                         peopleDao.upsert(anchor.copy(fatherId = clean.id, updatedAtMillis = now))
-                        if (oldFather == null) {
-                            peopleDao.all()
-                                .filter { person ->
-                                    person.id != anchor.id &&
-                                        person.id != clean.id &&
-                                        person.fatherId == null &&
-                                        person.motherId == oldMother
-                                }
-                                .forEach { sibling ->
-                                    peopleDao.upsert(sibling.copy(fatherId = clean.id, updatedAtMillis = now))
-                                }
+                        if (anchor.fatherId == null) {
+                            siblingsMissingParent(peopleDao.all(), anchor, clean.id, asFather = true).forEach { sibling ->
+                                peopleDao.upsert(sibling.copy(fatherId = clean.id, updatedAtMillis = now))
+                            }
                         }
                     }
                     if (linkRole == "mother" && anchor != null) {
-                        val oldFather = anchor.fatherId
-                        val oldMother = anchor.motherId
                         peopleDao.upsert(anchor.copy(motherId = clean.id, updatedAtMillis = now))
-                        if (oldMother == null) {
-                            peopleDao.all()
-                                .filter { person ->
-                                    person.id != anchor.id &&
-                                        person.id != clean.id &&
-                                        person.motherId == null &&
-                                        person.fatherId == oldFather
-                                }
-                                .forEach { sibling ->
-                                    peopleDao.upsert(sibling.copy(motherId = clean.id, updatedAtMillis = now))
-                                }
+                        if (anchor.motherId == null) {
+                            siblingsMissingParent(peopleDao.all(), anchor, clean.id, asFather = false).forEach { sibling ->
+                                peopleDao.upsert(sibling.copy(motherId = clean.id, updatedAtMillis = now))
+                            }
                         }
                     }
                     val kept = unionDao.all().filter { it.partnerAId != clean.id && it.partnerBId != clean.id }
@@ -455,12 +440,12 @@ class TreeRepository(
             .map { file ->
                 val count = runCatching { TreeCodec.decode(file.readText()).people.size }.getOrDefault(0)
                 val author = snapshotAuthorFile(file).takeIf { it.isFile }?.readText()?.trim()?.takeIf { it.isNotEmpty() }
-                SnapshotInfo(file.name, file.name.removeSuffix(".json"), count, author)
+                SnapshotInfo(file.name, SnapshotNames.label(file.name), count, author)
             }
     }
 
     suspend fun restoreSnapshot(fileName: String) {
-        require(fileName.matches(Regex("[0-9-]+\\.json"))) { "Некорректный снимок" }
+        require(SnapshotNames.isSafe(fileName)) { "Некорректный снимок" }
         mutex.withLock {
             val file = File(historyDir(), fileName)
             require(file.isFile && file.parentFile == historyDir()) { "Снимок не найден" }
@@ -502,15 +487,14 @@ class TreeRepository(
         schedulePush()
     }
 
-    suspend fun syncTreeFromGitIfNeeded(): RemoteRefresh {
+    suspend fun syncTreeFromGitIfNeeded(): RemoteRefresh = gitMutex.withLock {
         val settings = settingsRepository.settings.first()
-        if (!settings.gitConfigured) return RemoteRefresh.NotConfigured
+        if (!settings.gitConfigured) return@withLock RemoteRefresh.NotConfigured
         val empty = mutex.withLock { readLocked().people.isEmpty() }
-        if (!empty) return RemoteRefresh.Unchanged
-        return pullFromGitOnLaunch(forceEmptyLocal = true) ?: RemoteRefresh.Unchanged
+        pullFromGitOnLaunch(forceEmptyLocal = empty) ?: RemoteRefresh.Unchanged
     }
 
-    suspend fun pullFromGitOnLaunch(forceEmptyLocal: Boolean = false): RemoteRefresh? {
+    private suspend fun pullFromGitOnLaunch(forceEmptyLocal: Boolean = false): RemoteRefresh? {
         val settings = settingsRepository.settings.first()
         if (!settings.gitConfigured) return null
         repeat(5) { attempt ->
@@ -518,15 +502,15 @@ class TreeRepository(
                 delay(1_500L * (attempt + 1))
                 return@repeat
             }
-            when (val status = inspectGit()) {
+            when (val status = inspectGitUnlocked()) {
                 is RemoteRefresh.Incoming -> {
                     AppEventLog.info("git", "При запуске найдена новая версия в Git")
-                    return refreshFromGit()
+                    return refreshFromGitUnlocked()
                 }
                 is RemoteRefresh.Diverged -> {
                     if (status.count > 0) {
-                        AppEventLog.info("git", "Пустое древо: загрузка из Git (${status.count} чел.)")
-                        return refreshFromGit()
+                        AppEventLog.info("git", "В Git другая версия, загрузка (${status.count} чел.)")
+                        return refreshFromGitUnlocked()
                     }
                     return status
                 }
@@ -539,7 +523,7 @@ class TreeRepository(
                 }
                 is RemoteRefresh.Unchanged -> {
                     if (forceEmptyLocal && mutex.withLock { readLocked().people.isEmpty() }) {
-                        return refreshFromGit()
+                        return refreshFromGitUnlocked()
                     }
                     return status
                 }
@@ -549,7 +533,9 @@ class TreeRepository(
         return null
     }
 
-    suspend fun inspectGit(): RemoteRefresh {
+    suspend fun inspectGit(): RemoteRefresh = gitMutex.withLock { inspectGitUnlocked() }
+
+    private suspend fun inspectGitUnlocked(): RemoteRefresh {
         val look = lookAtGit() ?: return RemoteRefresh.NotConfigured
         return look.fold(
             onSuccess = { snapshot ->
@@ -580,7 +566,9 @@ class TreeRepository(
         )
     }
 
-    suspend fun refreshFromGit(): RemoteRefresh {
+    suspend fun refreshFromGit(): RemoteRefresh = gitMutex.withLock { refreshFromGitUnlocked() }
+
+    private suspend fun refreshFromGitUnlocked(): RemoteRefresh {
         val settings = settingsRepository.settings.first()
         val look = lookAtGit() ?: return RemoteRefresh.NotConfigured
         return look.fold(
@@ -625,6 +613,7 @@ class TreeRepository(
                 }
             }
             writeMarker(remoteSha, TreeCodec.contentHash(remoteDoc))
+            pendingUploadState.value = false
             AppEventLog.info("git", "Древо загружено из Git: ${remoteDoc.people.size} чел.")
             RemoteRefresh.Updated(remoteDoc.people.size)
         } catch (error: Exception) {
@@ -635,7 +624,9 @@ class TreeRepository(
         }
     }
 
-    suspend fun pushNow(): String {
+    suspend fun pushNow(): String = gitMutex.withLock { pushNowUnlocked() }
+
+    private suspend fun pushNowUnlocked(): String {
         pushJob?.cancel()
         val settings = settingsRepository.settings.first()
         val sync = syncFor(settings)
@@ -716,21 +707,8 @@ class TreeRepository(
 
     private fun schedulePush() {
         pushJob?.cancel()
-        pushJob = scope.launch {
-            delay(10_000)
-            val settings = settingsRepository.settings.first()
-            if (!settings.gitConfigured) return@launch
-            val peopleCount = mutex.withLock { peopleDao.all().count { !it.vacant } }
-            if (peopleCount == 0) return@launch
-            runCatching { pushToGit(force = false) }
-                .onSuccess { syncNoteState.value = null }
-                .onFailure { error ->
-                    if (error is kotlinx.coroutines.CancellationException) throw error
-                    val message = NetworkHelper.toUserMessage(error)
-                    if (message != null) AppEventLog.error("git", message, error)
-                    syncNoteState.value = message
-                }
-        }
+        pushJob = null
+        pendingUploadState.value = true
     }
 
     private suspend fun lookAtGit(): Result<GitSnapshot>? {
@@ -789,6 +767,7 @@ class TreeRepository(
                 val remoteHash = TreeCodec.contentHash(remoteDoc)
                 if (remoteHash == localHash) {
                     writeMarker(remote.sha, localHash)
+                    pendingUploadState.value = false
                     return GitPushResult.AlreadySame
                 }
                 val relation = relateGit(localHash, remoteHash, remote.sha, marker?.hash, marker?.sha)
@@ -814,6 +793,7 @@ class TreeRepository(
             sync.push(captured.second, remote?.sha, commitMessage)
         }
         writeMarker(sha, localHash)
+        pendingUploadState.value = false
         val changedDuringUpload = mutex.withLock { generation != captured.first }
         if (changedDuringUpload) schedulePush()
         return GitPushResult.Uploaded
@@ -849,9 +829,7 @@ class TreeRepository(
         val dir = historyDir()
         val latest = dir.listFiles { file -> file.extension == "json" }?.maxByOrNull { it.name }
         if (latest != null && latest.readText() == text) return
-        val name = DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss-SSS")
-            .withZone(ZoneId.systemDefault())
-            .format(Instant.now()) + ".json"
+        val name = SnapshotNames.fileName(Instant.now(), ZoneId.systemDefault())
         File(dir, name).writeText(text)
         val author = settingsRepository.settings.first().userFio()
         if (author.isNotBlank()) {

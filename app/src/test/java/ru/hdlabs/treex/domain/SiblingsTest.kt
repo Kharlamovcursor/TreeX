@@ -21,6 +21,20 @@ class SiblingsTest {
     }
 
     @Test
+    fun newFatherIsNotCopiedOntoPeopleWithoutParents() {
+        val anchor = PersonEntity(id = "galina", gender = "f", motherId = null)
+        val stranger = PersonEntity(id = "vladimir", gender = "m")
+        val sister = PersonEntity(id = "olga", gender = "f", motherId = "maria")
+        val withMother = PersonEntity(id = "galina2", gender = "f", motherId = "maria")
+        val people = listOf(anchor, stranger, sister, withMother, PersonEntity(id = "maria", gender = "f"))
+        assertTrue(siblingsMissingParent(people, anchor, "pavlov", asFather = true).isEmpty())
+        assertEquals(
+            listOf("olga"),
+            siblingsMissingParent(people, withMother, "pavlov", asFather = true).map { it.id },
+        )
+    }
+
+    @Test
     fun noSiblingWhenNoSharedParent() {
         val a = PersonEntity(id = "a", fatherId = "f1", motherId = "m1")
         val b = PersonEntity(id = "b", fatherId = "f2", motherId = "m2")

@@ -81,9 +81,20 @@ object TreeLayout {
                 (person.motherId != null && person.motherId in byId)
         }
 
-        var guard = 0
-        while (guard++ < 8) {
+        repeat(people.size + unions.size + 4) {
             var changed = false
+            people.forEach { person ->
+                val parentGenerations = listOfNotNull(person.fatherId, person.motherId)
+                    .filter { it in byId && it != person.id }
+                    .map { generation.getValue(it) }
+                if (parentGenerations.isNotEmpty()) {
+                    val below = parentGenerations.max() + 1
+                    if ((generation[person.id] ?: 0) < below) {
+                        generation[person.id] = below
+                        changed = true
+                    }
+                }
+            }
             unions.forEach { union ->
                 if (union.partnerAId !in byId || union.partnerBId !in byId) return@forEach
                 val generationA = generation.getValue(union.partnerAId)
@@ -91,45 +102,21 @@ object TreeLayout {
                 if (generationA == generationB) return@forEach
                 val parentsA = hasParents(union.partnerAId)
                 val parentsB = hasParents(union.partnerBId)
-                when {
-                    !parentsA && parentsB -> {
-                        generation[union.partnerAId] = generationB
-                        changed = true
-                    }
-                    parentsA && !parentsB -> {
-                        generation[union.partnerBId] = generationA
-                        changed = true
-                    }
-                    !parentsA && !parentsB -> {
-                        val shared = minOf(generationA, generationB)
-                        if (generationA != shared) {
-                            generation[union.partnerAId] = shared
-                            changed = true
-                        }
-                        if (generationB != shared) {
-                            generation[union.partnerBId] = shared
-                            changed = true
-                        }
-                    }
-                    else -> {
-                        val shared = maxOf(generationA, generationB)
-                        if (generationA != shared) {
-                            generation[union.partnerAId] = shared
-                            changed = true
-                        }
-                        if (generationB != shared) {
-                            generation[union.partnerBId] = shared
-                            changed = true
-                        }
-                    }
+                val shared = when {
+                    !parentsA && parentsB -> generationB
+                    parentsA && !parentsB -> generationA
+                    !parentsA && !parentsB -> minOf(generationA, generationB)
+                    else -> maxOf(generationA, generationB)
+                }
+                if (generationA != shared) {
+                    generation[union.partnerAId] = shared
+                    changed = true
+                }
+                if (generationB != shared) {
+                    generation[union.partnerBId] = shared
+                    changed = true
                 }
             }
-            if (!changed) break
-        }
-
-        var parentPass = 0
-        while (parentPass++ < people.size + 4) {
-            var changed = false
             people.forEach { person ->
                 val childGen = generation[person.id] ?: return@forEach
                 listOfNotNull(person.fatherId, person.motherId).forEach { parentId ->
@@ -141,7 +128,7 @@ object TreeLayout {
                     }
                 }
             }
-            if (!changed) break
+            if (!changed) return@repeat
         }
 
         openLinks.filter { it.slot == "bridge" && it.anchorIsParent }.forEach { link ->
@@ -229,7 +216,10 @@ object TreeLayout {
             }
         }
         openLinks.filter { it.slot == "bridge" && it.anchorId in placed }.forEach { link ->
-            val childIds = link.childIds.filter { it in placed }
+            val childIds = link.childIds.filter { childId ->
+                val child = people.find { it.id == childId } ?: return@filter false
+                childId in placed && child.fatherId != link.anchorId && child.motherId != link.anchorId
+            }
             if (childIds.isNotEmpty()) {
                 groups += ChildGroup(listOf(link.anchorId), childIds, open = true)
             }

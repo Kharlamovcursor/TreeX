@@ -107,7 +107,6 @@ fun TreeScreen(nav: NavHostController, highlight: String) {
     var refreshing by remember { mutableStateOf(false) }
     var updatedMessage by remember { mutableStateOf<String?>(null) }
     var developerMessage by remember { mutableStateOf<String?>(null) }
-    var gitChoice by remember { mutableStateOf<RemoteRefresh.Diverged?>(null) }
     var activeHighlight by remember { mutableStateOf(highlight) }
     var centerToken by remember { mutableIntStateOf(0) }
     var pendingLinkId by remember { mutableStateOf<String?>(null) }
@@ -186,7 +185,9 @@ fun TreeScreen(nav: NavHostController, highlight: String) {
                                 .getOrElse { it.message ?: "Не удалось отправить в Git" }
                         }
                     }
-                    is RemoteRefresh.Diverged -> gitChoice = result
+                    is RemoteRefresh.Diverged -> updatedMessage = appliedGitMessage(
+                        app.container.treeRepository.refreshFromGit(),
+                    )
                     is RemoteRefresh.Updated -> updatedMessage = "Информация обновлена. В древе ${result.count} чел."
                     RemoteRefresh.Unchanged -> {
                         updatedMessage = if (state.people.isEmpty() && settings.gitConfigured) {
@@ -449,35 +450,6 @@ fun TreeScreen(nav: NavHostController, highlight: String) {
             },
         )
     }
-    gitChoice?.let { choice ->
-        AlertDialog(
-            onDismissRequest = { gitChoice = null },
-            title = { Text("В Git другая версия") },
-            text = {
-                Text(
-                    "В Git ${choice.count} чел., и на телефоне есть свои правки. Загрузить Git или отправить телефон?",
-                    color = HdTextSecondary,
-                )
-            },
-            confirmButton = {
-                HdPrimaryButton("Загрузить из Git") {
-                    gitChoice = null
-                    scope.launch {
-                        updatedMessage = appliedGitMessage(app.container.treeRepository.refreshFromGit())
-                    }
-                }
-            },
-            dismissButton = {
-                HdSecondaryButton("Отправить телефон") {
-                    gitChoice = null
-                    scope.launch {
-                        updatedMessage = runCatching { app.container.treeRepository.pushNow() }
-                            .getOrElse { it.message ?: "Не удалось отправить в Git" }
-                    }
-                }
-            },
-        )
-    }
     if (showBranchConnectModes && focus != null) {
         AlertDialog(
             onDismissRequest = { showBranchConnectModes = false },
@@ -590,16 +562,31 @@ private fun TreeScreenToolbar(
     modifier: Modifier = Modifier,
 ) {
     Row(modifier, verticalAlignment = Alignment.CenterVertically) {
-        IconButton(onClick = onGitRefresh) {
+        Button(
+            onClick = onGitRefresh,
+            enabled = !refreshing,
+            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+            colors = ButtonDefaults.buttonColors(
+                containerColor = HdPanelElevated,
+                contentColor = HdTextPrimary,
+            ),
+        ) {
             if (refreshing) {
                 CircularProgressIndicator(
-                    modifier = Modifier.size(22.dp),
+                    modifier = Modifier.size(18.dp),
                     strokeWidth = 2.dp,
                     color = HdOrange,
                 )
             } else {
-                Icon(Icons.Filled.Refresh, contentDescription = "Обновить информацию", tint = HdTextPrimary)
+                Icon(
+                    Icons.Filled.Refresh,
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp),
+                    tint = HdOrange,
+                )
             }
+            Spacer(Modifier.size(6.dp))
+            Text("Git", fontWeight = FontWeight.SemiBold)
         }
         IconButton(onClick = onHelp) {
             Icon(Icons.Filled.HelpOutline, contentDescription = "Справка", tint = HdTextPrimary)

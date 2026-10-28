@@ -77,65 +77,64 @@ internal object SugiyamaFamilyLayout {
         fun cardsWidth(unit: Unit): Float =
             unit.members.size * cardW + (unit.members.size - 1) * gapX
 
-        val seen = HashSet<Unit>()
         val primaryParent = HashMap<Unit, Unit>()
-        val visitOrder = mutableListOf<Unit>()
+        val layers = units.groupBy { it.generation }.mapValues { it.value.toMutableList() }.toSortedMap()
 
-        fun orient(child: Unit, parent: Unit) {
-            if (child.members.size != 2) return
-            val blood = child.members.filter { member ->
-                parentIdsOf(member).any { byMember[it] === parent }
+        fun parentRank(personId: String): Int? {
+            val ranks = parentIdsOf(personId).mapNotNull { parentId ->
+                val parent = byMember[parentId] ?: return@mapNotNull null
+                val layer = layers[parent.generation] ?: return@mapNotNull null
+                val index = layer.indexOf(parent)
+                if (index < 0) null else index
             }
-            val other = child.members.filter { it !in blood }
-            if (blood.size != 1 || other.size != 1) return
-            val spouseParents = parentIdsOf(other[0]).mapNotNull { byMember[it] }.distinct()
-            val spouseOnLeft = spouseParents.any { seen.contains(it) && it !== parent }
-            child.members = if (spouseOnLeft) listOf(other[0], blood[0]) else listOf(blood[0], other[0])
+            return ranks.minOrNull()
         }
 
-        fun walk(parent: Unit) {
-            kidsOf(parent).forEach { child ->
-                if (!seen.add(child)) return@forEach
-                primaryParent[child] = parent
-                orient(child, parent)
-                visitOrder += child
-                walk(child)
+        fun orderKey(unit: Unit): String {
+            val parents = unit.members.flatMap { parentIdsOf(it) }.mapNotNull { byMember[it] }.distinct()
+            val underCouple = parents.any { it.members.size >= 2 }
+            if (underCouple) {
+                val blood = unit.members.filter { parentIdsOf(it).isNotEmpty() }
+                return (blood.ifEmpty { unit.members }).minOf { birthOf(it) }
+            }
+            val childBirth = kidsOf(unit).minOfOrNull { child ->
+                val blood = child.members.filter { member ->
+                    parentIdsOf(member).any { byMember[it] === unit }
+                }
+                (blood.ifEmpty { child.members }).minOf { birthOf(it) }
+            }
+            return childBirth ?: unit.members.minOf { birthOf(it) }
+        }
+
+        fun orient(unit: Unit) {
+            if (unit.members.size != 2) return
+            val leftRank = parentRank(unit.members[0])
+            val rightRank = parentRank(unit.members[1])
+            val swap = when {
+                leftRank != null && rightRank != null -> leftRank > rightRank
+                leftRank == null && rightRank != null -> true
+                else -> false
+            }
+            if (swap) unit.members = listOf(unit.members[1], unit.members[0])
+        }
+
+        layers.keys.sorted().forEach { gen ->
+            val layer = layers.getValue(gen)
+            layer.sortWith(compareBy({ orderKey(it) }, { it.members.minOf { id -> birthOf(id) } }, { it.members.first() }))
+            layer.forEach { unit -> orient(unit) }
+            layer.forEach { unit ->
+                val parents = unit.members.flatMap { parentIdsOf(it) }.mapNotNull { byMember[it] }.distinct()
+                val primary = parents.minByOrNull { parent ->
+                    layers[parent.generation]?.indexOf(parent) ?: Int.MAX_VALUE
+                }
+                if (primary != null) primaryParent[unit] = primary
             }
         }
-
-        val roots = units
-            .filter { unit -> unit.members.none { parentIdsOf(it).isNotEmpty() } }
-            .sortedWith(
-                compareBy(
-                    { unit -> kidsOf(unit).isEmpty() },
-                    { unit ->
-                        kidsOf(unit).minOfOrNull { child ->
-                            child.members.minOf { birthOf(it) }
-                        } ?: unit.members.minOf { birthOf(it) }
-                    },
-                    { it.members.minOf { id -> birthOf(id) } },
-                ),
-            )
-        roots.forEach { root ->
-            if (!seen.add(root)) return@forEach
-            visitOrder += root
-            walk(root)
-        }
-        units.sortedWith(
-            compareBy({ it.generation }, { it.members.minOf { id -> birthOf(id) } }, { it.members.first() }),
-        ).forEach { unit ->
-            if (seen.add(unit)) {
-                visitOrder += unit
-                walk(unit)
-            }
-        }
-
         units.forEach { unit ->
             unit.innerGap = gapX
             unit.width = cardsWidth(unit)
             unit.height = unit.members.maxOf { heights[it] ?: TreeLayout.CARD_H }
         }
-        val layers = visitOrder.groupBy { it.generation }.mapValues { it.value.toMutableList() }.toSortedMap()
         layers.forEach { (_, layer) ->
             val rowH = layer.maxOf { it.height }
             layer.forEach { it.height = rowH }
@@ -205,6 +204,41 @@ internal object SugiyamaFamilyLayout {
                 }
                 cursor = unit.left + unit.width
             }
+        }
+
+        layers.keys.sorted().drop(1).forEach { gen ->
+            val parents = layers[gen - 1] ?: return@forEach
+            var edge = Float.NEGATIVE_INFINITY
+            parents.forEach { parent ->
+                val kids = kidsOf(parent).filter { primaryParent[it] === parent }
+                if (kids.isEmpty()) return@forEach
+                val left = kids.minOf { it.left }
+                val overlap = edge + SIBLING_GAP - left
+                if (overlap > 0f) shift(parent, overlap)
+                val placedKids = kidsOf(parent).filter { primaryParent[it] === parent }
+                edge = max(edge, placedKids.maxOf { it.left + it.width })
+            }
+        }
+        val topGen = layers.firstKey()
+        layers.getValue(topGen).forEach { unit ->
+            val centers = kidsOf(unit).flatMap { child ->
+                child.members.filter { member ->
+                    parentIdsOf(member).any { byMember[it] === unit }
+                }.map { member ->
+                    val index = child.members.indexOf(member)
+                    child.left + index * (cardW + gapX) + cardW / 2f
+                }
+            }
+            if (centers.isNotEmpty()) {
+                unit.left = centers.average().toFloat() - unit.width / 2f
+            }
+        }
+        var topCursor = Float.NEGATIVE_INFINITY
+        layers.getValue(topGen).forEach { unit ->
+            if (topCursor != Float.NEGATIVE_INFINITY && unit.left < topCursor + FAMILY_GAP) {
+                unit.left = topCursor + FAMILY_GAP
+            }
+            topCursor = unit.left + unit.width
         }
 
         val minLeft = units.minOf { it.left }

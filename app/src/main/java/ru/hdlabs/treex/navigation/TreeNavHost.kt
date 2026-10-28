@@ -1,5 +1,6 @@
 package ru.hdlabs.treex.navigation
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -79,10 +80,27 @@ fun TreeNavHost() {
     var gitNotice by remember { mutableStateOf<String?>(null) }
     var updateError by remember { mutableStateOf<String?>(null) }
     var updateDownloading by remember { mutableStateOf(false) }
+    var askUpload by remember { mutableStateOf(false) }
+    var closeAfterUpload by remember { mutableStateOf(false) }
+    val pendingUpload by app.container.treeRepository.pendingUpload.collectAsStateWithLifecycle()
+    val activity = context as? android.app.Activity
 
     if (!settings.userProfileComplete) {
         UserOnboardingScreen()
         return
+    }
+
+    LaunchedEffect(Unit) {
+        app.leaveHint.collect {
+            if (app.container.treeRepository.pendingUpload.value) {
+                closeAfterUpload = false
+                askUpload = true
+            }
+        }
+    }
+    BackHandler(enabled = nav.previousBackStackEntry == null && pendingUpload && !askUpload) {
+        closeAfterUpload = true
+        askUpload = true
     }
 
     LaunchedEffect(settings.userProfileComplete) {
@@ -271,16 +289,49 @@ fun TreeNavHost() {
                 }
             },
             dismissButton = {
-                if (diverged) {
-                    HdSecondaryButton("Отправить телефон") {
-                        pendingGit = null
-                        scope.launch {
-                            gitNotice = runCatching { app.container.treeRepository.pushNow() }
-                                .getOrElse { it.message ?: "Не удалось отправить в Git" }
-                        }
+                HdSecondaryButton("Не сейчас") { pendingGit = null }
+            },
+        )
+    }
+    if (askUpload) {
+        AlertDialog(
+            onDismissRequest = { askUpload = false },
+            title = { Text("Отправить изменения в Git?") },
+            text = {
+                Text(
+                    "На телефоне есть правки, которых ещё нет на сервере.",
+                    color = HdTextSecondary,
+                )
+            },
+            confirmButton = {
+                HdPrimaryButton("Отправить") {
+                    askUpload = false
+                    scope.launch {
+                        gitNotice = runCatching {
+                            when (val status = app.container.treeRepository.inspectGit()) {
+                                is RemoteRefresh.LocalAhead -> app.container.treeRepository.pushNow()
+                                is RemoteRefresh.Incoming, is RemoteRefresh.Diverged -> when (
+                                    val loaded = app.container.treeRepository.refreshFromGit()
+                                ) {
+                                    is RemoteRefresh.Updated ->
+                                        "На сервере была другая версия. Телефон обновлён из Git: ${loaded.count} чел."
+                                    is RemoteRefresh.Failed -> loaded.message
+                                    else -> "На сервере была другая версия. Телефон обновлён из Git."
+                                }
+                                RemoteRefresh.Unchanged -> "Телефон и Git уже совпадают."
+                                is RemoteRefresh.Failed -> status.message
+                                RemoteRefresh.NotConfigured -> "Git не настроен."
+                                else -> "Не удалось отправить изменения."
+                            }
+                        }.getOrElse { it.message ?: "Не удалось отправить в Git" }
+                        if (closeAfterUpload) activity?.finish()
                     }
-                } else {
-                    HdSecondaryButton("Не сейчас") { pendingGit = null }
+                }
+            },
+            dismissButton = {
+                HdSecondaryButton("Не сейчас") {
+                    askUpload = false
+                    if (closeAfterUpload) activity?.finish()
                 }
             },
         )
