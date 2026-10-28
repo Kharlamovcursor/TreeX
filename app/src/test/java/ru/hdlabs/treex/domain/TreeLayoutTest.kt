@@ -182,6 +182,42 @@ class TreeLayoutTest {
     }
 
     @Test
+    fun familyWithSisterAndInLawParentsStaysStable() {
+        val people = listOf(
+            PersonEntity(id = "gf", gender = "m", birthDate = "1940-01-01"),
+            PersonEntity(id = "gm", gender = "f", birthDate = "1942-01-01"),
+            PersonEntity(id = "f", gender = "m", birthDate = "1965-01-01", fatherId = "gf", motherId = "gm"),
+            PersonEntity(id = "m", gender = "f", birthDate = "1967-01-01"),
+            PersonEntity(id = "self", gender = "m", birthDate = "1990-01-01", fatherId = "f", motherId = "m"),
+            PersonEntity(id = "wife", gender = "f", birthDate = "1991-01-01", fatherId = "wf", motherId = "wm"),
+            PersonEntity(id = "kid", gender = "m", birthDate = "2015-01-01", fatherId = "self", motherId = "wife"),
+            PersonEntity(id = "sis", gender = "f", birthDate = "1992-01-01", fatherId = "f", motherId = "m"),
+            PersonEntity(id = "sil", gender = "m", birthDate = "1991-06-01"),
+            PersonEntity(id = "niece", gender = "f", birthDate = "2016-01-01", fatherId = "sil", motherId = "sis"),
+            PersonEntity(id = "wf", gender = "m", birthDate = "1966-01-01", lastName = "Тесть"),
+            PersonEntity(id = "wm", gender = "f", birthDate = "1968-01-01", lastName = "Тёща"),
+        )
+        val unions = listOf(
+            UnionEntity("1", "gf", "gm"),
+            UnionEntity("2", "f", "m"),
+            UnionEntity("3", "self", "wife"),
+            UnionEntity("4", "sis", "sil"),
+            UnionEntity("5", "wf", "wm"),
+        )
+        val placed = TreeLayout.place(people, unions, homePersonId = "self")
+        val card = placed.cards.associateBy { it.id }
+        assertEquals(people.size, card.size)
+        assertEquals(card.getValue("self").top, card.getValue("wife").top, 0.5f)
+        assertEquals(card.getValue("sis").top, card.getValue("sil").top, 0.5f)
+        assertTrue(card.getValue("f").top < card.getValue("self").top)
+        assertTrue(card.getValue("wm").top < card.getValue("wife").top)
+        assertEquals(card.getValue("f").top, card.getValue("wm").top, 0.5f)
+        assertTrue(card.getValue("kid").top > card.getValue("self").top)
+        assertTrue(card.getValue("niece").top > card.getValue("sis").top)
+        cardsDoNotOverlap(placed.cards)
+    }
+
+    @Test
     fun bridgeKeepsDescendantBelowTheSurvivingPerson() {
         val placed = TreeLayout.place(
             listOf(

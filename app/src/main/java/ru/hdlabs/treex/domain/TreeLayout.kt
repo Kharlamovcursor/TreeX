@@ -2,6 +2,7 @@ package ru.hdlabs.treex.domain
 
 import ru.hdlabs.treex.data.local.PersonEntity
 import ru.hdlabs.treex.data.local.UnionEntity
+import kotlin.math.abs
 import kotlin.math.max
 
 data class TreeCard(val id: String, val left: Float, val top: Float, val height: Float = TreeLayout.CARD_H)
@@ -177,41 +178,6 @@ object TreeLayout {
             }
     }
 
-    private fun alignRowsByGeneration(cards: MutableList<TreeCard>, generation: Map<String, Int>) {
-        if (cards.isEmpty() || generation.isEmpty()) return
-        val byGen = cards.groupBy { generation[it.id] ?: 0 }
-        var y = PAD
-        for (g in byGen.keys.sorted()) {
-            val row = byGen.getValue(g)
-            val rowH = row.maxOf { it.height }
-            row.forEach { card ->
-                val index = cards.indexOfFirst { it.id == card.id }
-                if (index >= 0) {
-                    cards[index] = cards[index].copy(top = y)
-                }
-            }
-            y += rowH + ROW_GAP
-        }
-        resolveHorizontalOverlaps(cards, generation)
-    }
-
-    private fun resolveHorizontalOverlaps(cards: MutableList<TreeCard>, generation: Map<String, Int>) {
-        val byGen = cards.groupBy { generation[it.id] ?: 0 }
-        byGen.values.forEach { row ->
-            if (row.size < 2) return@forEach
-            val ordered = row.sortedBy { it.left }.map { it.id }
-            for (index in 1 until ordered.size) {
-                val prev = cards.first { it.id == ordered[index - 1] }
-                val currIndex = cards.indexOfFirst { it.id == ordered[index] }
-                val curr = cards[currIndex]
-                val minLeft = prev.left + CARD_W + SPOUSE_GAP
-                if (curr.left < minLeft - 0.1f) {
-                    cards[currIndex] = curr.copy(left = minLeft)
-                }
-            }
-        }
-    }
-
     fun place(
         people: List<PersonEntity>,
         unions: List<UnionEntity>,
@@ -264,18 +230,27 @@ object TreeLayout {
             val members = orderMembers(safe, spouses, byId)
             val memberSet = members.toSet()
             val nextStack = stack + memberSet
+            val bloodAnchors = safe.distinct()
+            val bloodParentIds = bloodAnchors.flatMap { id ->
+                parentsOf(byId.getValue(id))
+            }.filter { it in byId && it !in stack && it !in memberSet }.toSet()
             val chainsByMember = buildMap {
                 for (memberId in members) {
-                    val parentIds = parentsOf(byId.getValue(memberId))
+                    var parentIds = parentsOf(byId.getValue(memberId))
                         .filter { it !in stack && it !in memberSet }
+                    if (memberId in bloodAnchors && bloodAnchors.size == 1) {
+                        parentIds = parentIds.filter { it !in bloodParentIds }
+                    }
                     if (parentIds.isEmpty()) continue
                     val chain = buildParentChain(parentIds, nextStack) ?: continue
                     put(memberId, chain)
                 }
             }
-            val useSplitParents = chainsByMember.size >= 2 && members.size >= 2
+            val useSplitParents = chainsByMember.isNotEmpty() && members.size >= 2
             val parentChain = if (!useSplitParents) chainsByMember.values.firstOrNull() else null
             val memberParentChains = if (useSplitParents) chainsByMember else emptyMap()
+            val hoistInLawParentChains = memberParentChains.isNotEmpty() &&
+                memberParentChains.keys.none { it in bloodAnchors }
             val natural = people.filter { child ->
                 if (child.id in nextStack) return@filter false
                 val parents = parentsOf(child)
@@ -304,7 +279,14 @@ object TreeLayout {
             val children = (natural + bridged)
                 .sortedWith(compareBy({ it.birthDate }, { it.id }))
                 .map { child -> buildHouse(listOf(child.id), nextStack) }
-            return House(safe, members, children, parentChain, memberParentChains)
+            return House(
+                safe,
+                members,
+                children,
+                parentChain,
+                memberParentChains,
+                hoistInLawParentChains = hoistInLawParentChains,
+            )
         }
 
         val graphComponents = treeComponents(people, unions)
@@ -365,7 +347,6 @@ object TreeLayout {
             position(house, cursor, PAD, cards, cardIds, childGroups, byId, heights, openLinks)
             cursor += house.width + HOUSE_GAP
         }
-        alignRowsByGeneration(cards, generationMap(people, unions, openLinks))
         val spouseLinks = unions.mapNotNull { union ->
             if (union.partnerAId in byId && union.partnerBId in byId && union.partnerAId != union.partnerBId) {
                 union.partnerAId to union.partnerBId
@@ -437,7 +418,11 @@ object TreeLayout {
         } else {
             ROW_GAP + house.children.maxOf { subtreeHeight(it, heights) }
         }
-        val splitAbove = house.memberParentChains.values.maxOfOrNull { subtreeHeight(it, heights) } ?: 0f
+        val splitAbove = if (house.hoistInLawParentChains) {
+            0f
+        } else {
+            house.memberParentChains.values.maxOfOrNull { subtreeHeight(it, heights) } ?: 0f
+        }
         val singleAbove = house.parentChain?.let { subtreeHeight(it, heights) } ?: 0f
         val above = when {
             splitAbove > 0f -> splitAbove + ROW_GAP
@@ -458,6 +443,7 @@ object TreeLayout {
         heights: Map<String, Float>,
         openLinks: List<OpenLink>,
         siblingRowHeight: Float? = null,
+        inLawRowTop: Float? = null,
     ) {
         house.left = left
         house.top = top
@@ -470,14 +456,51 @@ object TreeLayout {
             membersTop = top + subtreeHeight(parents, heights) + ROW_GAP
         }
         if (house.memberParentChains.isNotEmpty()) {
-            var maxAbove = 0f
-            house.members.forEachIndexed { index, id ->
-                val chain = house.memberParentChains[id] ?: return@forEachIndexed
-                val colLeft = membersLeft + index * (CARD_W + SPOUSE_GAP) + (CARD_W - chain.width) / 2f
-                position(chain, colLeft, top, cards, cardIds, childGroups, byId, heights, openLinks, siblingRowHeight = null)
-                maxAbove = max(maxAbove, subtreeHeight(chain, heights))
+            if (inLawRowTop != null && house.hoistInLawParentChains) {
+                house.members.forEachIndexed { index, id ->
+                    val chain = house.memberParentChains[id] ?: return@forEachIndexed
+                    var colLeft = membersLeft + index * (CARD_W + SPOUSE_GAP) + (CARD_W - chain.width) / 2f
+                    val rowH = uniformRowHeight(chain.members, heights)
+                    val chainTop = inLawRowTop - (subtreeHeight(chain, heights) - rowH)
+                    colLeft = shiftLeftForRow(colLeft, chainTop, cards)
+                    position(
+                        chain,
+                        colLeft,
+                        chainTop,
+                        cards,
+                        cardIds,
+                        childGroups,
+                        byId,
+                        heights,
+                        openLinks,
+                        siblingRowHeight = null,
+                    )
+                }
+                membersTop = top
+            } else {
+                val chainHeights = house.memberParentChains.mapValues { (_, chain) ->
+                    subtreeHeight(chain, heights)
+                }
+                val maxAbove = chainHeights.values.maxOrNull() ?: 0f
+                house.members.forEachIndexed { index, id ->
+                    val chain = house.memberParentChains[id] ?: return@forEachIndexed
+                    val colLeft = membersLeft + index * (CARD_W + SPOUSE_GAP) + (CARD_W - chain.width) / 2f
+                    val chainTop = top + (maxAbove - chainHeights.getValue(id))
+                    position(
+                        chain,
+                        colLeft,
+                        chainTop,
+                        cards,
+                        cardIds,
+                        childGroups,
+                        byId,
+                        heights,
+                        openLinks,
+                        siblingRowHeight = null,
+                    )
+                }
+                membersTop = top + maxAbove + ROW_GAP
             }
-            membersTop = top + maxAbove + ROW_GAP
         }
         if (house.parentChain != null || house.memberParentChains.isNotEmpty()) {
             house.members.forEach { memberId ->
@@ -503,6 +526,7 @@ object TreeLayout {
             var childLeft = left + (house.width - childrenWidth) / 2f
             val childTop = membersTop + memberRowH + ROW_GAP
             val childrenRowH = house.children.maxOf { uniformRowHeight(it.members, heights) }
+            val coupleRowTop = membersTop
             house.children.forEach { child ->
                 position(
                     child,
@@ -515,6 +539,7 @@ object TreeLayout {
                     heights,
                     openLinks,
                     siblingRowHeight = childrenRowH,
+                    inLawRowTop = if (child.hoistInLawParentChains) coupleRowTop else null,
                 )
                 childLeft += child.width + HOUSE_GAP
             }
@@ -531,6 +556,18 @@ object TreeLayout {
                 val childIds = link.childIds.filter { id -> cards.any { it.id == id } }
                 if (childIds.isNotEmpty()) childGroups.add(ChildGroup(listOf(link.anchorId), childIds, open = true))
             }
+        }
+    }
+
+    private fun shiftLeftForRow(left: Float, top: Float, cards: List<TreeCard>): Float {
+        var candidate = left
+        val sameRow = cards.filter { abs(it.top - top) < 0.5f }
+        while (true) {
+            val blocked = sameRow.any { other ->
+                !(candidate + CARD_W <= other.left + 0.1f || other.left + CARD_W <= candidate + 0.1f)
+            }
+            if (!blocked) return candidate
+            candidate += CARD_W + SPOUSE_GAP
         }
     }
 
@@ -569,6 +606,7 @@ object TreeLayout {
         val children: List<House>,
         val parentChain: House? = null,
         val memberParentChains: Map<String, House> = emptyMap(),
+        val hoistInLawParentChains: Boolean = false,
         var width: Float = 0f,
         var left: Float = 0f,
         var top: Float = 0f,
