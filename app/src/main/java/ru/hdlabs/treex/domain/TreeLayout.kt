@@ -393,6 +393,13 @@ object TreeLayout {
     private fun memberWidth(count: Int): Float =
         if (count <= 0) 0f else count * CARD_W + (count - 1) * SPOUSE_GAP
 
+    private fun inLawReserveWidth(house: House): Float =
+        if (house.children.any { it.hoistInLawParentChains }) {
+            2 * CARD_W + SPOUSE_GAP + HOUSE_GAP
+        } else {
+            0f
+        }
+
     private fun measure(house: House): Float {
         house.parentChain?.let { measure(it) }
         house.memberParentChains.values.forEach { measure(it) }
@@ -407,7 +414,8 @@ object TreeLayout {
             house.memberParentChains.isNotEmpty() -> rowWidth
             else -> house.parentChain?.width ?: 0f
         }
-        house.width = max(rowWidth, max(childrenWidth, parentsWidth))
+        val reserve = inLawReserveWidth(house)
+        house.width = max(rowWidth + reserve, max(childrenWidth, parentsWidth + reserve))
         return house.width
     }
 
@@ -444,22 +452,42 @@ object TreeLayout {
         openLinks: List<OpenLink>,
         siblingRowHeight: Float? = null,
         inLawRowTop: Float? = null,
+        inLawColumnLeft: Float? = null,
     ) {
         house.left = left
         house.top = top
         var membersTop = top
         val selfWidth = memberWidth(house.members.size)
-        val membersLeft = left + (house.width - selfWidth) / 2f
+        val reserveForInLawChildren = house.children.any { it.hoistInLawParentChains }
+        val membersLeft = if (reserveForInLawChildren) {
+            left + house.width - selfWidth
+        } else {
+            left + (house.width - selfWidth) / 2f
+        }
         house.parentChain?.let { parents ->
-            val parentLeft = left + (house.width - parents.width) / 2f
+            val parentLeft = if (reserveForInLawChildren) {
+                left + house.width - parents.width
+            } else {
+                left + (house.width - parents.width) / 2f
+            }
             position(parents, parentLeft, top, cards, cardIds, childGroups, byId, heights, openLinks, siblingRowHeight = null)
             membersTop = top + subtreeHeight(parents, heights) + ROW_GAP
         }
         if (house.memberParentChains.isNotEmpty()) {
             if (inLawRowTop != null && house.hoistInLawParentChains) {
-                house.members.forEachIndexed { index, id ->
+                val displayMembers = orderMembersByParentColumn(
+                    house.members,
+                    cards,
+                    byId,
+                    house.memberParentChains,
+                )
+                displayMembers.forEachIndexed { index, id ->
                     val chain = house.memberParentChains[id] ?: return@forEachIndexed
-                    var colLeft = membersLeft + index * (CARD_W + SPOUSE_GAP) + (CARD_W - chain.width) / 2f
+                    var colLeft = if (inLawColumnLeft != null) {
+                        inLawColumnLeft + (memberWidth(2) - chain.width) / 2f
+                    } else {
+                        membersLeft + index * (CARD_W + SPOUSE_GAP) + (CARD_W - chain.width) / 2f
+                    }
                     val rowH = uniformRowHeight(chain.members, heights)
                     val chainTop = inLawRowTop - (subtreeHeight(chain, heights) - rowH)
                     colLeft = shiftLeftForRow(colLeft, chainTop, cards)
@@ -482,7 +510,13 @@ object TreeLayout {
                     subtreeHeight(chain, heights)
                 }
                 val maxAbove = chainHeights.values.maxOrNull() ?: 0f
-                house.members.forEachIndexed { index, id ->
+                val displayMembers = orderMembersByParentColumn(
+                    house.members,
+                    cards,
+                    byId,
+                    house.memberParentChains,
+                )
+                displayMembers.forEachIndexed { index, id ->
                     val chain = house.memberParentChains[id] ?: return@forEachIndexed
                     val colLeft = membersLeft + index * (CARD_W + SPOUSE_GAP) + (CARD_W - chain.width) / 2f
                     val chainTop = top + (maxAbove - chainHeights.getValue(id))
@@ -507,8 +541,14 @@ object TreeLayout {
                 linkMemberToParents(memberId, byId, childGroups)
             }
         }
+        val displayMembers = orderMembersByParentColumn(
+            house.members,
+            cards,
+            byId,
+            house.memberParentChains,
+        )
         val memberRowH = siblingRowHeight ?: uniformRowHeight(house.members, heights)
-        house.members.forEachIndexed { index, id ->
+        displayMembers.forEachIndexed { index, id ->
             if (cardIds.add(id)) {
                 cards.add(
                     TreeCard(
@@ -527,10 +567,28 @@ object TreeLayout {
             val childTop = membersTop + memberRowH + ROW_GAP
             val childrenRowH = house.children.maxOf { uniformRowHeight(it.members, heights) }
             val coupleRowTop = membersTop
-            house.children.forEach { child ->
+            val orderedChildren = house.children.sortedWith(
+                compareBy(
+                    { child -> byId[child.anchors.firstOrNull().orEmpty()]?.birthDate.orEmpty() },
+                    { child -> child.anchors.firstOrNull().orEmpty() },
+                ),
+            )
+            orderedChildren.forEach { child ->
+                val anchorId = child.anchors.firstOrNull()
+                val parentCenter = if (anchorId != null) {
+                    parentColumnCenterOf(anchorId, cards, byId)
+                } else {
+                    Float.MAX_VALUE
+                }
+                val childX = if (orderedChildren.size == 1 && parentCenter != Float.MAX_VALUE) {
+                    parentCenter - anchorOffsetInHouse(child, cards, byId)
+                } else {
+                    childLeft
+                }
+                val inLawLeft = if (child.hoistInLawParentChains) left else null
                 position(
                     child,
-                    childLeft,
+                    childX,
                     childTop,
                     cards,
                     cardIds,
@@ -540,8 +598,9 @@ object TreeLayout {
                     openLinks,
                     siblingRowHeight = childrenRowH,
                     inLawRowTop = if (child.hoistInLawParentChains) coupleRowTop else null,
+                    inLawColumnLeft = inLawLeft,
                 )
-                childLeft += child.width + HOUSE_GAP
+                childLeft = max(childLeft, childX + child.width + HOUSE_GAP)
             }
             house.children.groupBy { child ->
                 val anchor = byId[child.anchors.firstOrNull()]
@@ -557,6 +616,57 @@ object TreeLayout {
                 if (childIds.isNotEmpty()) childGroups.add(ChildGroup(listOf(link.anchorId), childIds, open = true))
             }
         }
+    }
+
+    private fun orderMembersByParentColumn(
+        members: List<String>,
+        cards: List<TreeCard>,
+        byId: Map<String, PersonEntity>,
+        memberParentChains: Map<String, House> = emptyMap(),
+    ): List<String> {
+        if (members.size <= 1) return members
+        fun parentColumnCenter(personId: String): Float {
+            if (memberParentChains.containsKey(personId)) return Float.MIN_VALUE
+            val person = byId[personId] ?: return Float.MAX_VALUE
+            val centers = listOfNotNull(person.fatherId, person.motherId)
+                .mapNotNull { parentId -> cards.find { it.id == parentId }?.left?.plus(CARD_W / 2f) }
+            return when {
+                centers.isEmpty() -> Float.MAX_VALUE
+                else -> centers.average().toFloat()
+            }
+        }
+        return members.sortedWith(
+            compareBy({ parentColumnCenter(it) }, { byId[it]?.birthDate.orEmpty() }, { it }),
+        )
+    }
+
+    private fun parentColumnCenterOf(
+        personId: String,
+        cards: List<TreeCard>,
+        byId: Map<String, PersonEntity>,
+    ): Float {
+        val person = byId[personId] ?: return Float.MAX_VALUE
+        val centers = listOfNotNull(person.fatherId, person.motherId)
+            .mapNotNull { parentId -> cards.find { it.id == parentId }?.left?.plus(CARD_W / 2f) }
+        return if (centers.isEmpty()) Float.MAX_VALUE else centers.average().toFloat()
+    }
+
+    private fun anchorOffsetInHouse(
+        house: House,
+        cards: List<TreeCard>,
+        byId: Map<String, PersonEntity>,
+    ): Float {
+        val anchorId = house.anchors.firstOrNull() ?: return house.width / 2f
+        val displayMembers = orderMembersByParentColumn(
+            house.members,
+            cards,
+            byId,
+            house.memberParentChains,
+        )
+        val index = displayMembers.indexOf(anchorId).coerceAtLeast(0)
+        val rowWidth = memberWidth(house.members.size)
+        val membersLeft = (house.width - rowWidth) / 2f
+        return membersLeft + index * (CARD_W + SPOUSE_GAP) + CARD_W / 2f
     }
 
     private fun shiftLeftForRow(left: Float, top: Float, cards: List<TreeCard>): Float {

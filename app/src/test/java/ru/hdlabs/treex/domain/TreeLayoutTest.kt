@@ -169,14 +169,15 @@ class TreeLayoutTest {
         assertEquals(card.getValue("self").top, card.getValue("wife").top, 0.5f)
         val selfCenter = card.getValue("self").left + TreeLayout.CARD_W / 2f
         val wifeCenter = card.getValue("wife").left + TreeLayout.CARD_W / 2f
-        val fatherCenter = card.getValue("f").left + TreeLayout.CARD_W / 2f
-        val wmCenter = card.getValue("wm").left + TreeLayout.CARD_W / 2f
-        assertTrue(abs(fatherCenter - selfCenter) < abs(fatherCenter - wifeCenter))
-        assertTrue(abs(wmCenter - wifeCenter) < abs(wmCenter - selfCenter))
+        val bloodParentCenter = (card.getValue("f").left + card.getValue("m").left) / 2f + TreeLayout.CARD_W / 2f
+        val inLawParentCenter = (card.getValue("wf").left + card.getValue("wm").left) / 2f + TreeLayout.CARD_W / 2f
+        assertTrue(abs(bloodParentCenter - selfCenter) < abs(bloodParentCenter - wifeCenter))
+        assertTrue(abs(inLawParentCenter - wifeCenter) < abs(inLawParentCenter - selfCenter))
         assertTrue(card.getValue("f").top < card.getValue("self").top)
         assertTrue(card.getValue("wm").top < card.getValue("wife").top)
         assertEquals(card.getValue("f").top, card.getValue("wm").top, 0.5f)
         assertEquals(card.getValue("m").top, card.getValue("wf").top, 0.5f)
+        assertTrue(card.getValue("wife").left < card.getValue("self").left)
         cardsDoNotOverlap(placed.cards)
         assertTrue(placed.childGroups.none { "f" in it.parentIds && "wm" in it.parentIds })
     }
@@ -212,6 +213,9 @@ class TreeLayoutTest {
         assertTrue(card.getValue("f").top < card.getValue("self").top)
         assertTrue(card.getValue("wm").top < card.getValue("wife").top)
         assertEquals(card.getValue("f").top, card.getValue("wm").top, 0.5f)
+        assertTrue(card.getValue("wife").left < card.getValue("self").left)
+        assertTrue(card.getValue("sis").left < card.getValue("sil").left)
+        assertTrue(card.getValue("wm").left < card.getValue("f").left)
         assertTrue(card.getValue("kid").top > card.getValue("self").top)
         assertTrue(card.getValue("niece").top > card.getValue("sis").top)
         cardsDoNotOverlap(placed.cards)
