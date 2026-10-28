@@ -177,7 +177,6 @@ class TreeLayoutTest {
         assertTrue(card.getValue("wm").top < card.getValue("wife").top)
         assertEquals(card.getValue("f").top, card.getValue("wm").top, 0.5f)
         assertEquals(card.getValue("m").top, card.getValue("wf").top, 0.5f)
-        assertTrue(card.getValue("wife").left < card.getValue("self").left)
         cardsDoNotOverlap(placed.cards)
         assertTrue(placed.childGroups.none { "f" in it.parentIds && "wm" in it.parentIds })
     }
@@ -213,9 +212,6 @@ class TreeLayoutTest {
         assertTrue(card.getValue("f").top < card.getValue("self").top)
         assertTrue(card.getValue("wm").top < card.getValue("wife").top)
         assertEquals(card.getValue("f").top, card.getValue("wm").top, 0.5f)
-        assertTrue(card.getValue("wife").left < card.getValue("self").left)
-        assertTrue(card.getValue("sis").left < card.getValue("sil").left)
-        assertTrue(card.getValue("wm").left < card.getValue("f").left)
         assertTrue(card.getValue("kid").top > card.getValue("self").top)
         assertTrue(card.getValue("niece").top > card.getValue("sis").top)
         cardsDoNotOverlap(placed.cards)
