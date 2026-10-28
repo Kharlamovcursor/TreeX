@@ -289,6 +289,8 @@ class TreeLayoutTest {
             PersonEntity(id = "maxim", gender = "m", birthDate = "2024-10-03", fatherId = "yakov", motherId = "elizaveta"),
             PersonEntity(id = "ksenia", gender = "f", birthDate = "2017-09-20", fatherId = "yakov", motherId = "elizaveta"),
             PersonEntity(id = "alena", gender = "f", birthDate = "2010-05-03", fatherId = "dmitry", motherId = "svetlana"),
+            PersonEntity(id = "maria", gender = "f", birthDate = "2013-02-19", fatherId = "dmitry", motherId = "svetlana"),
+            PersonEntity(id = "arina", gender = "f", birthDate = "2015-09-21", fatherId = "dmitry", motherId = "svetlana"),
             PersonEntity(id = "ivan", gender = "m", birthDate = "2006-05-29", fatherId = "dmitry", motherId = "svetlana"),
         )
         val unions = listOf(
@@ -304,6 +306,18 @@ class TreeLayoutTest {
         assertSpousesAdjacent("le", "li", card)
         assertSpousesAdjacent("hv", "hg", card)
         assertTrue(card.getValue("andrey").left < card.getValue("elizaveta").left)
+        assertTrue(card.getValue("yakov").left < card.getValue("svetlana").left)
+        val eyMid = (card.getValue("elizaveta").left + card.getValue("yakov").left + TreeLayout.CARD_W) / 2f
+        val eyKidsMid = listOf("maxim", "ksenia").let { ids ->
+            (ids.minOf { card.getValue(it).left } + ids.maxOf { card.getValue(it).left } + TreeLayout.CARD_W) / 2f
+        }
+        assertEquals(eyMid, eyKidsMid, 30f)
+        val sdMid = (card.getValue("svetlana").left + card.getValue("dmitry").left + TreeLayout.CARD_W) / 2f
+        val sdKids = listOf("ivan", "alena", "maria", "arina")
+        val sdKidsMid = (sdKids.minOf { card.getValue(it).left } + sdKids.maxOf { card.getValue(it).left } + TreeLayout.CARD_W) / 2f
+        assertEquals(sdMid, sdKidsMid, 30f)
+        val kharlamovRight = maxOf(card.getValue("hv").left, card.getValue("hg").left) + TreeLayout.CARD_W
+        assertTrue(kharlamovRight <= card.getValue("dmitry").left + 1f)
         val lymarRight = card.getValue("li").left + TreeLayout.CARD_W
         val kharlamovLeft = card.getValue("hv").left
         assertTrue(
