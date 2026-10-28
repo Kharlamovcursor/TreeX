@@ -11,9 +11,9 @@ import kotlin.math.max
  * Sugiyama, Tagawa, Toda (1981), with *ports* on each spouse so a wife's
  * parents attach to her card, not the couple midpoint. Horizontal coordinates
  * follow the Graphviz/ELK layered sweep: center over neighbors, then pack
- * left-to-right **in layer order**. If both spouses have parents, the inner
- * gap grows until those parent units fit above each column — the standard
- * port-clearance rule for family charts.
+ * left-to-right **in layer order**. Spouses stay one card-gap apart. Inside a
+ * couple the partner whose parents sit further left takes the left card.
+ * Units that do not share parents keep a wider gutter than siblings.
  */
 internal object SugiyamaFamilyLayout {
     data class Placed(val id: String, val left: Float, val top: Float, val height: Float)
@@ -27,7 +27,6 @@ internal object SugiyamaFamilyLayout {
         gapY: Float,
         pad: Float,
         heights: Map<String, Float>,
-        houseGap: Float = 44f,
     ): List<Placed> {
         if (people.isEmpty()) return emptyList()
         val ids = people.map { it.id }.toSet()
@@ -64,20 +63,6 @@ internal object SugiyamaFamilyLayout {
                 }
                 .distinct()
 
-        fun spouseNeighborUnits(unit: Unit): List<Unit> {
-            val members = unit.members.toSet()
-            return unions.mapNotNull { union ->
-                val other = when {
-                    union.partnerAId in members && union.partnerBId in byMember && union.partnerBId !in members ->
-                        byMember[union.partnerBId]
-                    union.partnerBId in members && union.partnerAId in byMember && union.partnerAId !in members ->
-                        byMember[union.partnerAId]
-                    else -> null
-                }
-                other?.takeIf { it.generation == unit.generation }
-            }.distinct()
-        }
-
         val layers = units.groupBy { it.generation }.mapValues { it.value.toMutableList() }.toSortedMap()
         layers.forEach { (_, layer) ->
             layer.sortWith(
@@ -99,87 +84,111 @@ internal object SugiyamaFamilyLayout {
         fun barycenter(ports: List<Float>, fallback: Float): Float =
             if (ports.isEmpty()) fallback else ports.average().toFloat()
 
-        repeat(24) { pass ->
-            if (pass % 2 == 0) {
-                layers.keys.sorted().drop(1).forEach { gen ->
-                    val layer = layers.getValue(gen)
-                    val prev = layers[gen - 1] ?: return@forEach
-                    layer.sortWith(
-                        compareBy(
-                            { unit ->
-                                val ports = unit.members.flatMap { parentIdsOf(it) }.mapNotNull { port(it, prev) } +
-                                    spouseNeighborUnits(unit).mapNotNull { neighbor ->
-                                        val idx = layer.indexOf(neighbor)
-                                        if (idx >= 0) idx.toFloat() else null
-                                    }
-                                barycenter(ports, layer.indexOf(unit).toFloat())
-                            },
-                            { it.members.minOf { id -> byId.getValue(id).birthDate } },
-                            { it.members.first() },
-                        ),
-                    )
-                }
-            } else {
-                layers.keys.sortedDescending().drop(1).forEach { gen ->
-                    val layer = layers.getValue(gen)
-                    val next = layers[gen + 1] ?: return@forEach
-                    layer.sortWith(
-                        compareBy(
-                            { unit ->
-                                val ports = childPersonsOf(unit).mapNotNull { port(it, next) } +
-                                    spouseNeighborUnits(unit).mapNotNull { neighbor ->
-                                        val idx = layer.indexOf(neighbor)
-                                        if (idx >= 0) idx.toFloat() else null
-                                    }
-                                barycenter(ports, layer.indexOf(unit).toFloat())
-                            },
-                            { it.members.minOf { id -> byId.getValue(id).birthDate } },
-                            { it.members.first() },
-                        ),
-                    )
-                }
-            }
+        val pivot = layers.keys.sorted().let { keys -> keys[keys.size / 2] }
+        fun byBirth(unit: Unit): Pair<String, String> =
+            unit.members.minOf { id -> byId.getValue(id).birthDate } to unit.members.first()
+        for (gen in layers.keys.filter { it < pivot }.sortedDescending()) {
+            val layer = layers.getValue(gen)
+            val next = layers[gen + 1] ?: continue
+            layer.sortWith(
+                compareBy(
+                    { unit ->
+                        barycenter(childPersonsOf(unit).mapNotNull { port(it, next) }, layer.size / 2f)
+                    },
+                    { byBirth(it).first },
+                    { byBirth(it).second },
+                ),
+            )
+        }
+        for (gen in layers.keys.filter { it > pivot }.sorted()) {
+            val layer = layers.getValue(gen)
+            val prev = layers[gen - 1] ?: continue
+            layer.sortWith(
+                compareBy(
+                    { unit ->
+                        barycenter(
+                            unit.members.flatMap { parentIdsOf(it) }.mapNotNull { port(it, prev) },
+                            layer.size / 2f,
+                        )
+                    },
+                    { byBirth(it).first },
+                    { byBirth(it).second },
+                ),
+            )
         }
 
-        layers.keys.sorted().forEach { gen ->
-            layers.getValue(gen).forEach { unit ->
-                unit.innerGap = gapX
-                if (unit.members.size == 2) {
-                    val leftParents = parentIdsOf(unit.members[0]).mapNotNull { byMember[it] }
-                        .filter { it.generation == unit.generation - 1 }
-                        .distinct()
-                    val rightParents = parentIdsOf(unit.members[1]).mapNotNull { byMember[it] }
-                        .filter { it.generation == unit.generation - 1 }
-                        .distinct()
-                    if (leftParents.isNotEmpty() && rightParents.isNotEmpty() &&
-                        leftParents.toSet() != rightParents.toSet()
-                    ) {
-                        val need = (leftParents.sumOf { it.width.toDouble() }.toFloat() +
-                            rightParents.sumOf { it.width.toDouble() }.toFloat()) / 2f + houseGap
-                        unit.innerGap = max(gapX, need - cardW)
-                    }
-                }
-                unit.width = unit.members.size * cardW + (unit.members.size - 1) * unit.innerGap
-                unit.height = unit.members.maxOf { heights[it] ?: TreeLayout.CARD_H }
-            }
-        }
-        layers.forEach { (_, layer) ->
-            val rowH = layer.maxOf { it.height }
-            layer.forEach { it.height = rowH }
-        }
-
-        fun personCenter(personId: String, cardW: Float): Float? {
+        fun personCenter(personId: String): Float? {
             val unit = byMember[personId] ?: return null
             val index = unit.members.indexOf(personId)
             if (index < 0) return null
             return unit.left + index * (cardW + unit.innerGap) + cardW / 2f
         }
 
+        fun parentCenter(personId: String): Float? {
+            val centers = parentIdsOf(personId).mapNotNull { personCenter(it) }
+            return if (centers.isEmpty()) null else centers.average().toFloat()
+        }
+
+        fun orientTowardParents(unit: Unit) {
+            if (unit.members.size != 2) return
+            val leftId = unit.members[0]
+            val rightId = unit.members[1]
+            val leftParents = parentCenter(leftId)
+            val rightParents = parentCenter(rightId)
+            val coupleMid = unit.left + unit.width / 2f
+            val swap = when {
+                leftParents != null && rightParents != null -> leftParents > rightParents + 1f
+                leftParents != null -> leftParents > coupleMid + 8f
+                rightParents != null -> rightParents < coupleMid - 8f
+                else -> false
+            }
+            if (swap) unit.members = listOf(rightId, leftId)
+        }
+
+        fun orientByParentOrder() {
+            layers.keys.sorted().forEach { gen ->
+                val prev = layers[gen - 1] ?: return@forEach
+                layers.getValue(gen).forEach { unit ->
+                    if (unit.members.size != 2) return@forEach
+                    fun key(id: String): Float? {
+                        val ports = parentIdsOf(id).mapNotNull { port(it, prev) }
+                        return if (ports.isEmpty()) null else ports.average().toFloat()
+                    }
+                    val leftKey = key(unit.members[0])
+                    val rightKey = key(unit.members[1])
+                    val swap = when {
+                        leftKey != null && rightKey != null -> leftKey > rightKey
+                        leftKey == null && rightKey != null -> true
+                        else -> false
+                    }
+                    if (swap) unit.members = listOf(unit.members[1], unit.members[0])
+                }
+            }
+        }
+
+        orientByParentOrder()
+        units.forEach { unit ->
+            unit.innerGap = gapX
+            unit.width = unit.members.size * cardW + (unit.members.size - 1) * gapX
+            unit.height = unit.members.maxOf { heights[it] ?: TreeLayout.CARD_H }
+        }
+        layers.forEach { (_, layer) ->
+            val rowH = layer.maxOf { it.height }
+            layer.forEach { it.height = rowH }
+        }
+
+        fun separation(left: Unit, right: Unit): Float {
+            val leftParents = left.members.flatMap { parentIdsOf(it) }.mapNotNull { byMember[it] }.toSet()
+            val rightParents = right.members.flatMap { parentIdsOf(it) }.mapNotNull { byMember[it] }.toSet()
+            return if (leftParents.intersect(rightParents).isNotEmpty()) SIBLING_GAP else FAMILY_GAP
+        }
+
         fun pack(layer: List<Unit>) {
-            var cursor = Float.NEGATIVE_INFINITY
-            layer.forEach { unit ->
-                unit.left = max(unit.left, cursor)
-                cursor = unit.left + unit.width + houseGap
+            layer.forEachIndexed { index, unit ->
+                if (index == 0) return@forEachIndexed
+                val previous = layer[index - 1]
+                val minLeft = previous.left + previous.width + separation(previous, unit)
+                unit.left = max(unit.left, minLeft)
             }
         }
 
@@ -194,15 +203,16 @@ internal object SugiyamaFamilyLayout {
             layers.keys.sortedDescending().forEach { gen ->
                 val layer = layers.getValue(gen)
                 layer.forEach { unit ->
-                    val targets = childPersonsOf(unit).mapNotNull { personCenter(it, cardW) }
+                    val targets = childPersonsOf(unit).mapNotNull { personCenter(it) }
                     pullTo(unit, targets, fromChildren)
                 }
                 pack(layer)
             }
             layers.keys.sorted().forEach { gen ->
                 val layer = layers.getValue(gen)
+                layer.forEach { unit -> orientTowardParents(unit) }
                 layer.forEach { unit ->
-                    val targets = unit.members.flatMap { parentIdsOf(it) }.mapNotNull { personCenter(it, cardW) }
+                    val targets = unit.members.flatMap { parentIdsOf(it) }.mapNotNull { personCenter(it) }
                     pullTo(unit, targets, 0.45f)
                 }
                 pack(layer)
@@ -257,8 +267,11 @@ internal object SugiyamaFamilyLayout {
         return units
     }
 
+    private const val SIBLING_GAP = 44f
+    private const val FAMILY_GAP = 160f
+
     private class Unit(
-        val members: List<String>,
+        var members: List<String>,
         val generation: Int,
         var left: Float = 0f,
         var width: Float = 0f,

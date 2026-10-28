@@ -274,6 +274,62 @@ class TreeLayoutTest {
         assertTrue(placed.childGroups.any { it.open && "c" in it.childIds })
     }
 
+    @Test
+    fun spousesStayTogetherAndFaceTheirOwnParents() {
+        val people = listOf(
+            PersonEntity(id = "le", gender = "m", birthDate = "1960-05-30", lastName = "Лымарь", firstName = "Евгений"),
+            PersonEntity(id = "li", gender = "f", birthDate = "1960-05-30", lastName = "Лымарь", firstName = "Ирина"),
+            PersonEntity(id = "hv", gender = "m", birthDate = "1957-02-11", lastName = "Харламов", firstName = "Владимир"),
+            PersonEntity(id = "hg", gender = "f", birthDate = "1957-03-15", lastName = "Харламова", firstName = "Галина"),
+            PersonEntity(id = "andrey", gender = "m", birthDate = "1965-01-01", fatherId = "le", motherId = "li"),
+            PersonEntity(id = "yakov", gender = "m", birthDate = "1967-04-16", fatherId = "hv", motherId = "hg"),
+            PersonEntity(id = "elizaveta", gender = "f", birthDate = "1968-10-17", fatherId = "le", motherId = "li"),
+            PersonEntity(id = "dmitry", gender = "m", birthDate = "1976-05-14"),
+            PersonEntity(id = "svetlana", gender = "f", birthDate = "1982-03-24", fatherId = "hv", motherId = "hg"),
+            PersonEntity(id = "maxim", gender = "m", birthDate = "2024-10-03", fatherId = "yakov", motherId = "elizaveta"),
+            PersonEntity(id = "ksenia", gender = "f", birthDate = "2017-09-20", fatherId = "yakov", motherId = "elizaveta"),
+            PersonEntity(id = "alena", gender = "f", birthDate = "2010-05-03", fatherId = "dmitry", motherId = "svetlana"),
+            PersonEntity(id = "ivan", gender = "m", birthDate = "2006-05-29", fatherId = "dmitry", motherId = "svetlana"),
+        )
+        val unions = listOf(
+            UnionEntity("1", "le", "li"),
+            UnionEntity("2", "hv", "hg"),
+            UnionEntity("3", "yakov", "elizaveta"),
+            UnionEntity("4", "dmitry", "svetlana"),
+        )
+        val placed = TreeLayout.place(people, unions)
+        val card = placed.cards.associateBy { it.id }
+        assertSpousesAdjacent("elizaveta", "yakov", card)
+        assertSpousesAdjacent("svetlana", "dmitry", card)
+        assertSpousesAdjacent("le", "li", card)
+        assertSpousesAdjacent("hv", "hg", card)
+        assertTrue(card.getValue("andrey").left < card.getValue("elizaveta").left)
+        val lymarRight = card.getValue("li").left + TreeLayout.CARD_W
+        val kharlamovLeft = card.getValue("hv").left
+        assertTrue(
+            "Lymar/Kharlamov gap ${kharlamovLeft - lymarRight}",
+            kharlamovLeft - lymarRight >= 120f,
+        )
+        assertTrue(kharlamovLeft > lymarRight)
+        val coupleLeft = card.getValue("elizaveta").left
+        val coupleRight = card.getValue("yakov").left + TreeLayout.CARD_W
+        listOf("maxim", "ksenia").forEach { id ->
+            val center = card.getValue(id).left + TreeLayout.CARD_W / 2f
+            assertTrue("$id is outside Yakov and Elizaveta", center in coupleLeft..coupleRight)
+        }
+        assertTrue(card.getValue("ivan").left > card.getValue("yakov").left)
+        cardsDoNotOverlap(placed.cards)
+    }
+
+    private fun assertSpousesAdjacent(leftId: String, rightId: String, card: Map<String, TreeCard>) {
+        val left = card.getValue(leftId)
+        val right = card.getValue(rightId)
+        assertEquals(left.top, right.top, 0.5f)
+        assertTrue("$leftId should stand left of $rightId", left.left < right.left)
+        val gap = right.left - (left.left + TreeLayout.CARD_W)
+        assertEquals("$leftId and $rightId gap", 28f, gap, 0.5f)
+    }
+
     private fun cardsDoNotOverlap(cards: List<TreeCard>) {
         cards.forEach { first ->
             cards.filter { it.id != first.id }.forEach { second ->
