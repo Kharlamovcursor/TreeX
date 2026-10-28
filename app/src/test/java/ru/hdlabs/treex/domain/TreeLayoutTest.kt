@@ -179,6 +179,37 @@ class TreeLayoutTest {
         assertEquals(card.getValue("m").top, card.getValue("wf").top, 0.5f)
         cardsDoNotOverlap(placed.cards)
         assertTrue(placed.childGroups.none { "f" in it.parentIds && "wm" in it.parentIds })
+        assertTrue(card.getValue("self").left < card.getValue("wife").left)
+        assertTrue(card.getValue("f").left < card.getValue("wf").left)
+    }
+
+    @Test
+    fun inLawParentsStayOverDaughterEvenIfOlderThanBloodParents() {
+        val people = listOf(
+            PersonEntity(id = "gf", gender = "m", birthDate = "1940-01-01"),
+            PersonEntity(id = "gm", gender = "f", birthDate = "1942-01-01"),
+            PersonEntity(id = "f", gender = "m", birthDate = "1968-01-01", fatherId = "gf", motherId = "gm"),
+            PersonEntity(id = "m", gender = "f", birthDate = "1969-01-01"),
+            PersonEntity(id = "self", gender = "m", birthDate = "1990-01-01", fatherId = "f", motherId = "m"),
+            PersonEntity(id = "wife", gender = "f", birthDate = "1991-01-01", fatherId = "wf", motherId = "wm"),
+            PersonEntity(id = "wf", gender = "m", birthDate = "1960-01-01", lastName = "Тесть"),
+            PersonEntity(id = "wm", gender = "f", birthDate = "1961-01-01", lastName = "Тёща"),
+        )
+        val unions = listOf(
+            UnionEntity("1", "gf", "gm"),
+            UnionEntity("2", "f", "m"),
+            UnionEntity("3", "self", "wife"),
+            UnionEntity("4", "wf", "wm"),
+        )
+        val placed = TreeLayout.place(people, unions)
+        val card = placed.cards.associateBy { it.id }
+        val selfCenter = card.getValue("self").left + TreeLayout.CARD_W / 2f
+        val wifeCenter = card.getValue("wife").left + TreeLayout.CARD_W / 2f
+        val bloodParentCenter = (card.getValue("f").left + card.getValue("m").left) / 2f + TreeLayout.CARD_W / 2f
+        val inLawParentCenter = (card.getValue("wf").left + card.getValue("wm").left) / 2f + TreeLayout.CARD_W / 2f
+        assertTrue(abs(bloodParentCenter - selfCenter) < abs(bloodParentCenter - wifeCenter))
+        assertTrue(abs(inLawParentCenter - wifeCenter) < abs(inLawParentCenter - selfCenter))
+        cardsDoNotOverlap(placed.cards)
     }
 
     @Test
@@ -214,6 +245,16 @@ class TreeLayoutTest {
         assertEquals(card.getValue("f").top, card.getValue("wm").top, 0.5f)
         assertTrue(card.getValue("kid").top > card.getValue("self").top)
         assertTrue(card.getValue("niece").top > card.getValue("sis").top)
+        val coupleLeft = minOf(card.getValue("self").left, card.getValue("wife").left)
+        val coupleRight = maxOf(card.getValue("self").left, card.getValue("wife").left) + TreeLayout.CARD_W
+        assertTrue(
+            card.getValue("sis").left + TreeLayout.CARD_W <= coupleLeft + 0.1f ||
+                card.getValue("sis").left >= coupleRight - 0.1f,
+        )
+        val selfCenter = card.getValue("self").left + TreeLayout.CARD_W / 2f
+        val wifeCenter = card.getValue("wife").left + TreeLayout.CARD_W / 2f
+        val inLawParentCenter = (card.getValue("wf").left + card.getValue("wm").left) / 2f + TreeLayout.CARD_W / 2f
+        assertTrue(abs(inLawParentCenter - wifeCenter) < abs(inLawParentCenter - selfCenter))
         cardsDoNotOverlap(placed.cards)
     }
 
