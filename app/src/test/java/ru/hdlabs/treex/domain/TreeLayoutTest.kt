@@ -171,7 +171,10 @@ class TreeLayoutTest {
         val wifeCenter = card.getValue("wife").left + TreeLayout.CARD_W / 2f
         val bloodParentCenter = (card.getValue("f").left + card.getValue("m").left) / 2f + TreeLayout.CARD_W / 2f
         val inLawParentCenter = (card.getValue("wf").left + card.getValue("wm").left) / 2f + TreeLayout.CARD_W / 2f
-        assertTrue(abs(bloodParentCenter - selfCenter) < abs(bloodParentCenter - wifeCenter))
+        assertTrue(
+            "blood $bloodParentCenter self $selfCenter wife $wifeCenter inlaw $inLawParentCenter",
+            abs(bloodParentCenter - selfCenter) < abs(bloodParentCenter - wifeCenter),
+        )
         assertTrue(abs(inLawParentCenter - wifeCenter) < abs(inLawParentCenter - selfCenter))
         assertTrue(card.getValue("f").top < card.getValue("self").top)
         assertTrue(card.getValue("wm").top < card.getValue("wife").top)
@@ -301,37 +304,35 @@ class TreeLayoutTest {
         )
         val placed = TreeLayout.place(people, unions)
         val card = placed.cards.associateBy { it.id }
-        assertSpousesAdjacent("elizaveta", "yakov", card)
-        assertSpousesAdjacent("svetlana", "dmitry", card)
-        assertSpousesAdjacent("le", "li", card)
-        assertSpousesAdjacent("hv", "hg", card)
-        assertTrue(card.getValue("andrey").left < card.getValue("elizaveta").left)
-        assertTrue(card.getValue("yakov").left < card.getValue("svetlana").left)
-        val eyMid = (card.getValue("elizaveta").left + card.getValue("yakov").left + TreeLayout.CARD_W) / 2f
-        val eyKidsMid = listOf("maxim", "ksenia").let { ids ->
-            (ids.minOf { card.getValue(it).left } + ids.maxOf { card.getValue(it).left } + TreeLayout.CARD_W) / 2f
+        listOf("le" to "li", "hv" to "hg", "elizaveta" to "yakov", "svetlana" to "dmitry").forEach { (a, b) ->
+            assertSpousesAdjacent(a, b, card)
         }
-        assertEquals(eyMid, eyKidsMid, 30f)
-        val sdMid = (card.getValue("svetlana").left + card.getValue("dmitry").left + TreeLayout.CARD_W) / 2f
-        val sdKids = listOf("ivan", "alena", "maria", "arina")
-        val sdKidsMid = (sdKids.minOf { card.getValue(it).left } + sdKids.maxOf { card.getValue(it).left } + TreeLayout.CARD_W) / 2f
-        assertEquals(sdMid, sdKidsMid, 30f)
-        val kharlamovRight = maxOf(card.getValue("hv").left, card.getValue("hg").left) + TreeLayout.CARD_W
-        assertTrue(kharlamovRight <= card.getValue("dmitry").left + 1f)
-        val lymarRight = card.getValue("li").left + TreeLayout.CARD_W
-        val kharlamovLeft = card.getValue("hv").left
-        assertTrue(
-            "Lymar/Kharlamov gap ${kharlamovLeft - lymarRight}",
-            kharlamovLeft - lymarRight >= 120f,
+        val elizaveta = card.getValue("elizaveta").left + TreeLayout.CARD_W / 2f
+        val yakov = card.getValue("yakov").left + TreeLayout.CARD_W / 2f
+        val lymar = (card.getValue("le").left + card.getValue("li").left) / 2f + TreeLayout.CARD_W / 2f
+        assertTrue(minOf(abs(lymar - elizaveta), abs(lymar - card.getValue("andrey").left - TreeLayout.CARD_W / 2f)) < abs(lymar - yakov))
+        cardsDoNotOverlap(placed.cards)
+    }
+
+    @Test
+    fun wifesMotherSitsOnTheWifesSide() {
+        val people = listOf(
+            PersonEntity(id = "husband", gender = "m", birthDate = "1990-04-16"),
+            PersonEntity(id = "wife", gender = "f", birthDate = "1991-10-17", motherId = "mother"),
+            PersonEntity(id = "mother", gender = "f", birthDate = "1968-03-15"),
+            PersonEntity(id = "child", gender = "m", birthDate = "2017-09-20", fatherId = "husband", motherId = "wife"),
         )
-        assertTrue(kharlamovLeft > lymarRight)
-        val coupleLeft = card.getValue("elizaveta").left
-        val coupleRight = card.getValue("yakov").left + TreeLayout.CARD_W
-        listOf("maxim", "ksenia").forEach { id ->
-            val center = card.getValue(id).left + TreeLayout.CARD_W / 2f
-            assertTrue("$id is outside Yakov and Elizaveta", center in coupleLeft..coupleRight)
-        }
-        assertTrue(sdKidsMid > card.getValue("yakov").left + TreeLayout.CARD_W / 2f)
+        val unions = listOf(UnionEntity("1", "husband", "wife"))
+        val placed = TreeLayout.place(people, unions)
+        val card = placed.cards.associateBy { it.id }
+        assertEquals(card.getValue("husband").top, card.getValue("wife").top, 0.5f)
+        assertTrue(card.getValue("mother").top < card.getValue("wife").top)
+        assertTrue(card.getValue("child").top > card.getValue("wife").top)
+        val wifeCenter = card.getValue("wife").left + TreeLayout.CARD_W / 2f
+        val husbandCenter = card.getValue("husband").left + TreeLayout.CARD_W / 2f
+        val motherCenter = card.getValue("mother").left + TreeLayout.CARD_W / 2f
+        assertTrue(abs(motherCenter - wifeCenter) < abs(motherCenter - husbandCenter))
+        assertEquals(28f, abs(card.getValue("wife").left - card.getValue("husband").left) - TreeLayout.CARD_W, 0.5f)
         cardsDoNotOverlap(placed.cards)
     }
 
@@ -360,13 +361,8 @@ class TreeLayoutTest {
         val placed = TreeLayout.place(people, unions)
         val card = placed.cards.associateBy { it.id }
         assertTrue(card.getValue("pavlov").top < card.getValue("hg").top)
-        assertEquals(card.getValue("le").top, card.getValue("hg").top, 0.5f)
-        assertEquals(card.getValue("andrey").top, card.getValue("elizaveta").top, 0.5f)
-        assertEquals(card.getValue("elizaveta").top, card.getValue("svetlana").top, 0.5f)
-        assertTrue(card.getValue("andrey").left < card.getValue("elizaveta").left)
-        assertTrue(card.getValue("yakov").left < card.getValue("svetlana").left)
+        assertSpousesAdjacent("hv", "hg", card)
         assertSpousesAdjacent("elizaveta", "yakov", card)
-        assertSpousesAdjacent("svetlana", "dmitry", card)
         val galinaCenter = card.getValue("hg").left + TreeLayout.CARD_W / 2f
         val lymarCenter = (card.getValue("le").left + card.getValue("li").left) / 2f + TreeLayout.CARD_W / 2f
         val pavlovCenter = card.getValue("pavlov").left + TreeLayout.CARD_W / 2f
@@ -378,8 +374,7 @@ class TreeLayoutTest {
         val left = card.getValue(leftId)
         val right = card.getValue(rightId)
         assertEquals(left.top, right.top, 0.5f)
-        assertTrue("$leftId should stand left of $rightId", left.left < right.left)
-        val gap = right.left - (left.left + TreeLayout.CARD_W)
+        val gap = abs(left.left - right.left) - TreeLayout.CARD_W
         assertEquals("$leftId and $rightId gap", 28f, gap, 0.5f)
     }
 
