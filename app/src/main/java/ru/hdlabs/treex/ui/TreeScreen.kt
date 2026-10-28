@@ -723,6 +723,8 @@ private fun FocusActionPanel(
                 if (focus.fatherId !in known) TreeAction("Отец") { onAdd("father", focus.id) }
                 if (focus.motherId !in known) TreeAction("Мать") { onAdd("mother", focus.id) }
                 TreeAction(addSpouseLabel(focus.gender)) { onAdd("spouse", focus.id) }
+                TreeAction("Брат") { onAdd("brother", focus.id) }
+                TreeAction("Сестра") { onAdd("sister", focus.id) }
                 TreeAction("Ребёнок") { onAdd("child", focus.id) }
                 TreeAction("В новой ветке") { onAdd("branch", "") }
             }

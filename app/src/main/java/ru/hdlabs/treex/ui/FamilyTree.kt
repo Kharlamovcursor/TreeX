@@ -54,6 +54,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.TileMode
+import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
@@ -209,6 +211,7 @@ fun FamilyTree(
                 }
                 TreeLinks(
                     placement,
+                    byId,
                     Modifier
                         .width(placement.width.dp)
                         .height(placement.height.dp)
@@ -236,13 +239,120 @@ fun FamilyTree(
     }
 }
 
+private fun genderPalette(gender: String): List<Color> = when (gender) {
+    "f" -> listOf(
+        Color(0xFFFF4081),
+        Color(0xFFFF7043),
+        Color(0xFFFF8A80),
+        Color(0xFFF06292),
+        Color(0xFFFFAB40),
+    )
+    "m" -> listOf(
+        Color(0xFF42A5F5),
+        Color(0xFF1B5E20),
+        Color(0xFF4527A0),
+        Color(0xFF00838F),
+        Color(0xFF283593),
+    )
+    else -> listOf(HdBlue, HdOrange, HdBlue.copy(alpha = 0.75f))
+}
+
+private fun DrawScope.shimmerBrush(gender: String, bounds: Rect, phase: Float): Brush {
+    val span = (bounds.width + bounds.height).coerceAtLeast(120f)
+    return Brush.linearGradient(
+        colors = genderPalette(gender),
+        start = Offset(bounds.left - span + phase, bounds.top),
+        end = Offset(bounds.right + phase, bounds.bottom + span * 0.35f),
+        tileMode = TileMode.Mirror,
+    )
+}
+
+private fun DrawScope.drawKinLink(path: Path, gender: String, phase: Float, open: Boolean) {
+    val bounds = path.getBounds()
+    if (bounds.isEmpty) return
+    val width = if (open) 2.2.dp.toPx() else 2.6.dp.toPx()
+    val brush = shimmerBrush(gender, bounds, phase)
+    drawPath(
+        path,
+        genderPalette(gender).first().copy(alpha = 0.16f),
+        style = Stroke(width + 7.dp.toPx(), cap = StrokeCap.Round),
+    )
+    drawPath(
+        path,
+        brush,
+        style = Stroke(
+            width = width,
+            cap = StrokeCap.Round,
+            pathEffect = if (open) {
+                PathEffect.dashPathEffect(floatArrayOf(10f, 14f), phase)
+            } else {
+                null
+            },
+        ),
+    )
+}
+
+private fun DrawScope.drawSpouseBond(
+    from: Offset,
+    to: Offset,
+    lift: Float,
+    genderA: String,
+    genderB: String,
+    phase: Float,
+) {
+    val mid = Offset((from.x + to.x) / 2f, (from.y + to.y) / 2f - lift)
+    val span = abs(to.x - from.x).coerceAtLeast(48f)
+    val arch = lift.coerceAtLeast(14.dp.toPx()) + 10.dp.toPx()
+    fun bondPath(offsetY: Float): Path = Path().apply {
+        moveTo(from.x, from.y + offsetY)
+        cubicTo(
+            from.x + span * 0.22f,
+            from.y - arch + offsetY,
+            to.x - span * 0.22f,
+            to.y - arch + offsetY,
+            to.x,
+            to.y + offsetY,
+        )
+    }
+    val bounds = Rect(
+        left = minOf(from.x, to.x) - arch,
+        top = minOf(from.y, to.y) - arch * 1.4f,
+        right = maxOf(from.x, to.x) + arch,
+        bottom = maxOf(from.y, to.y) + 6.dp.toPx(),
+    )
+    val colors = (genderPalette(genderA) + genderPalette(genderB)).distinct()
+    val brush = Brush.linearGradient(
+        colors = colors,
+        start = Offset(bounds.left - 40f + phase, bounds.top),
+        end = Offset(bounds.right + phase, bounds.bottom),
+        tileMode = TileMode.Mirror,
+    )
+    listOf(-1.1.dp.toPx(), 0f, 1.1.dp.toPx()).forEach { offsetY ->
+        val path = bondPath(offsetY)
+        drawPath(path, colors.first().copy(alpha = 0.12f), style = Stroke(6.dp.toPx(), cap = StrokeCap.Round))
+    }
+    val main = bondPath(0f)
+    drawPath(main, brush, style = Stroke(2.4.dp.toPx(), cap = StrokeCap.Round))
+    drawPath(
+        bondPath(-0.55.dp.toPx()),
+        Color.White.copy(alpha = 0.35f),
+        style = Stroke(0.9.dp.toPx(), cap = StrokeCap.Round),
+    )
+    drawCircle(brush, 5.dp.toPx(), mid)
+    drawCircle(Color.White.copy(alpha = 0.55f), 2.dp.toPx(), mid)
+}
+
 @Composable
-private fun TreeLinks(placement: TreePlacement, modifier: Modifier = Modifier) {
+private fun TreeLinks(
+    placement: TreePlacement,
+    byId: Map<String, PersonEntity>,
+    modifier: Modifier = Modifier,
+) {
     val cards = placement.cards.associateBy { it.id }
     val phase by rememberInfiniteTransition(label = "links").animateFloat(
         initialValue = 0f,
-        targetValue = 64f,
-        animationSpec = infiniteRepeatable(tween(2400, easing = LinearEasing)),
+        targetValue = 96f,
+        animationSpec = infiniteRepeatable(tween(3200, easing = LinearEasing)),
         label = "dash",
     )
     Canvas(modifier) {
@@ -253,38 +363,36 @@ private fun TreeLinks(placement: TreePlacement, modifier: Modifier = Modifier) {
             val top = card.top.dp.toPx()
             return Rect(left, top, left + cardW, top + card.height.dp.toPx())
         }
-        fun drawElegant(path: Path, color: Color, open: Boolean) {
-            val width = if (open) 2f else 2.4.dp.toPx()
-            drawPath(path, color.copy(alpha = 0.12f), style = Stroke(width + 6.dp.toPx(), cap = StrokeCap.Round))
-            drawPath(
-                path,
-                color.copy(alpha = 0.82f),
-                style = Stroke(
-                    width = width,
-                    cap = StrokeCap.Round,
-                    pathEffect = PathEffect.dashPathEffect(floatArrayOf(if (open) 10f else 18f, if (open) 14f else 16f), phase),
-                ),
-            )
-        }
+        fun genderOf(id: String): String = byId[id]?.gender?.takeIf { it == "m" || it == "f" } ?: "u"
         placement.childGroups.forEach { group ->
-            val parents = group.parentIds.mapNotNull { rectOf(it) }
-            val children = group.childIds.mapNotNull { rectOf(it) }
-            if (parents.isEmpty() || children.isEmpty()) return@forEach
-            val origin = Offset(parents.map { it.center.x }.average().toFloat(), parents.maxOf { it.bottom })
-            parents.forEach { parent ->
+            val parentRects = group.parentIds.mapNotNull { id -> rectOf(id)?.let { id to it } }
+            val childRects = group.childIds.mapNotNull { id -> rectOf(id)?.let { id to it } }
+            if (parentRects.isEmpty() || childRects.isEmpty()) return@forEach
+            val origin = Offset(
+                parentRects.map { it.second.center.x }.average().toFloat(),
+                parentRects.maxOf { it.second.bottom },
+            )
+            parentRects.forEach { (parentId, parent) ->
                 val path = Path().apply {
                     moveTo(parent.center.x, parent.bottom)
                     quadraticBezierTo(parent.center.x, origin.y, origin.x, origin.y)
                 }
-                drawElegant(path, if (group.open) HdOrange else HdBlue, group.open)
+                drawKinLink(path, genderOf(parentId), phase, group.open)
             }
-            children.forEach { child ->
+            childRects.forEach { (childId, child) ->
                 val path = Path().apply {
                     moveTo(origin.x, origin.y)
                     val bend = (child.top - origin.y).coerceAtLeast(24.dp.toPx())
-                    cubicTo(origin.x, origin.y + bend * 0.45f, child.center.x, child.top - bend * 0.45f, child.center.x, child.top)
+                    cubicTo(
+                        origin.x,
+                        origin.y + bend * 0.45f,
+                        child.center.x,
+                        child.top - bend * 0.45f,
+                        child.center.x,
+                        child.top,
+                    )
                 }
-                drawElegant(path, if (group.open) HdOrange else HdBlue, group.open)
+                drawKinLink(path, genderOf(childId), phase, group.open)
             }
         }
         placement.spouseLinks.forEach { (first, second) ->
@@ -292,15 +400,16 @@ private fun TreeLinks(placement: TreePlacement, modifier: Modifier = Modifier) {
             val end = rectOf(second) ?: return@forEach
             val left = if (start.left <= end.left) start else end
             val right = if (start.left <= end.left) end else start
+            val leftId = if (start.left <= end.left) first else second
+            val rightId = if (start.left <= end.left) second else first
             val from = Offset(left.right, left.center.y)
             val to = Offset(right.left, right.center.y)
-            val lift = if (abs(left.top - right.top) < 2.dp.toPx() && right.left - left.right < cardW) 18.dp.toPx() else 0f
-            val path = Path().apply {
-                moveTo(from.x, from.y)
-                quadraticBezierTo((from.x + to.x) / 2f, (from.y + to.y) / 2f - lift, to.x, to.y)
+            val lift = if (abs(left.top - right.top) < 2.dp.toPx() && right.left - left.right < cardW) {
+                22.dp.toPx()
+            } else {
+                12.dp.toPx()
             }
-            drawElegant(path, HdOrange, open = false)
-            drawCircle(HdOrange.copy(alpha = 0.85f), 4.5.dp.toPx(), Offset((from.x + to.x) / 2f, (from.y + to.y) / 2f - lift))
+            drawSpouseBond(from, to, lift, genderOf(leftId), genderOf(rightId), phase)
         }
     }
 }

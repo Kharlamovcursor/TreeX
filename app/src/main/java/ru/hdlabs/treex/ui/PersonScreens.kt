@@ -121,7 +121,7 @@ fun PersonEditorScreen(routeId: String, role: String, anchor: String, nav: NavHo
     val scope = rememberCoroutineScope()
     val spouseDrafts = parseSpouseDrafts(spouseRaw)
     val spouseIds = spouseDrafts.map { it.personId }
-    val attach = if (creating && anchor.isNotBlank() && role in setOf("father", "mother", "spouse")) {
+    val attach = if (creating && anchor.isNotBlank() && role in setOf("father", "mother", "spouse", "sister", "brother")) {
         RelativeAttach(anchor, role)
     } else {
         null
@@ -243,6 +243,28 @@ fun PersonEditorScreen(routeId: String, role: String, anchor: String, nav: NavHo
                     buffer.mark("spouses")
                 }
             }
+            "sister", "brother" -> {
+                if (gender == "u") {
+                    gender = if (role == "sister") "f" else "m"
+                    buffer.mark("gender")
+                }
+                if (fatherId.isBlank()) {
+                    host.fatherId?.let {
+                        fatherId = it
+                        buffer.mark("father")
+                    }
+                }
+                if (motherId.isBlank()) {
+                    host.motherId?.let {
+                        motherId = it
+                        buffer.mark("mother")
+                    }
+                }
+                if (lastName.isBlank()) {
+                    lastName = host.lastName.ifBlank { suggestedParentFamilyName(host) }
+                    buffer.mark("lastName")
+                }
+            }
             "child" -> {
                 val father = if (host.gender == "m") {
                     host.id
@@ -362,6 +384,8 @@ fun PersonEditorScreen(routeId: String, role: String, anchor: String, nav: NavHo
         role == "spouse" && host?.gender == "f" -> "Новый супруг"
         role == "spouse" -> "Новый супруг"
         role == "child" -> "Новый ребёнок"
+        role == "sister" -> "Новая сестра"
+        role == "brother" -> "Новый брат"
         role == "branch" -> "Новая отдельная ветка"
         else -> "Новый человек"
     }
@@ -379,6 +403,10 @@ fun PersonEditorScreen(routeId: String, role: String, anchor: String, nav: NavHo
         role == "spouse" && host.gender == "m" -> "Это супруга для ${host.fullName()}."
         role == "spouse" -> "Это супруг для ${host.fullName()}."
         role == "child" -> "Это ребёнок для ${host.fullName()}. Фамилия и отчество подставятся сами."
+        role == "sister" ->
+            "Это сестра для ${host.fullName()}. Родители подставятся, если уже указаны; иначе добавьте отца и мать позже."
+        role == "brother" ->
+            "Это брат для ${host.fullName()}. Родители подставятся, если уже указаны; иначе добавьте отца и мать позже."
         else -> ""
     }
     HdScaffold(title = screenTitle, onBack = { finish() }) {
@@ -643,6 +671,10 @@ fun PersonDetailScreen(personId: String, nav: NavHostController) {
         HdSecondaryButton(addSpouseLabel(person.gender)) { nav.navigate(Routes.edit("new", "spouse", person.id)) }
         Spacer(Modifier.height(8.dp))
         HdSecondaryButton("Добавить ребёнка") { nav.navigate(Routes.edit("new", "child", person.id)) }
+        Spacer(Modifier.height(8.dp))
+        HdSecondaryButton("Добавить брата") { nav.navigate(Routes.edit("new", "brother", person.id)) }
+        Spacer(Modifier.height(8.dp))
+        HdSecondaryButton("Добавить сестру") { nav.navigate(Routes.edit("new", "sister", person.id)) }
         Spacer(Modifier.height(12.dp))
         HdPrimaryButton("Редактировать") { nav.navigate(Routes.edit(person.id)) }
         Spacer(Modifier.height(8.dp))

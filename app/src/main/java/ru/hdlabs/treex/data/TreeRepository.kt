@@ -139,7 +139,7 @@ class TreeRepository(
                 val fatherId = merged.fatherId?.takeIf { it in knownIds && it != merged.id }
                 val motherId = merged.motherId?.takeIf { it in knownIds && it != merged.id && it != fatherId }
                 val named = merged.firstName.isNotBlank() || merged.lastName.isNotBlank() || merged.middleName.isNotBlank()
-                val clean = merged.copy(
+                val baseClean = merged.copy(
                     lastName = capitalizePersonName(merged.lastName),
                     birthLastName = if (merged.gender == "f") {
                         capitalizePersonName(merged.birthLastName)
@@ -152,15 +152,28 @@ class TreeRepository(
                     motherId = motherId,
                     vacant = merged.vacant && !named,
                 )
+                val anchor = attach?.anchorId?.takeIf { it in knownIds && it != baseClean.id }?.let { id ->
+                    existing.find { it.id == id }
+                }
+                val linkRole = attach?.role?.takeIf { anchor != null }
+                val clean = when (linkRole) {
+                    "sister", "brother" -> {
+                        val host = anchor ?: baseClean
+                        val inheritedFather = host.fatherId?.takeIf { it in knownIds && it != baseClean.id }
+                        val inheritedMother = host.motherId?.takeIf { it in knownIds && it != baseClean.id && it != inheritedFather }
+                        baseClean.copy(
+                            gender = if (linkRole == "sister") "f" else "m",
+                            fatherId = inheritedFather ?: baseClean.fatherId,
+                            motherId = inheritedMother ?: baseClean.motherId,
+                        )
+                    }
+                    else -> baseClean
+                }
                 val parents = existing.associate { it.id to (it.fatherId to it.motherId) }.toMutableMap()
                 parents[clean.id] = clean.fatherId to clean.motherId
                 if (TreeRules.createsCycle(parents, clean.id, clean.fatherId, clean.motherId)) {
                     throw IllegalArgumentException("Такая связь замыкает круг в древе")
                 }
-                val anchor = attach?.anchorId?.takeIf { it in knownIds && it != clean.id }?.let { id ->
-                    existing.find { it.id == id }
-                }
-                val linkRole = attach?.role?.takeIf { anchor != null }
                 if (linkRole == "father" && anchor != null &&
                     TreeRules.createsCycle(parents, anchor.id, clean.id, anchor.motherId)
                 ) {
@@ -200,10 +213,38 @@ class TreeRepository(
                         ),
                     )
                     if (linkRole == "father" && anchor != null) {
+                        val oldFather = anchor.fatherId
+                        val oldMother = anchor.motherId
                         peopleDao.upsert(anchor.copy(fatherId = clean.id, updatedAtMillis = now))
+                        if (oldFather == null) {
+                            peopleDao.all()
+                                .filter { person ->
+                                    person.id != anchor.id &&
+                                        person.id != clean.id &&
+                                        person.fatherId == null &&
+                                        person.motherId == oldMother
+                                }
+                                .forEach { sibling ->
+                                    peopleDao.upsert(sibling.copy(fatherId = clean.id, updatedAtMillis = now))
+                                }
+                        }
                     }
                     if (linkRole == "mother" && anchor != null) {
+                        val oldFather = anchor.fatherId
+                        val oldMother = anchor.motherId
                         peopleDao.upsert(anchor.copy(motherId = clean.id, updatedAtMillis = now))
+                        if (oldMother == null) {
+                            peopleDao.all()
+                                .filter { person ->
+                                    person.id != anchor.id &&
+                                        person.id != clean.id &&
+                                        person.motherId == null &&
+                                        person.fatherId == oldFather
+                                }
+                                .forEach { sibling ->
+                                    peopleDao.upsert(sibling.copy(motherId = clean.id, updatedAtMillis = now))
+                                }
+                        }
                     }
                     val kept = unionDao.all().filter { it.partnerAId != clean.id && it.partnerBId != clean.id }
                     val created = nextSpouses.map { spouse ->
