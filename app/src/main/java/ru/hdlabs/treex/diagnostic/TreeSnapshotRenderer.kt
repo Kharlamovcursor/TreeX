@@ -11,6 +11,8 @@ import android.graphics.RectF
 import android.text.Layout
 import android.text.StaticLayout
 import android.text.TextPaint
+import kotlinx.coroutines.runBlocking
+import ru.hdlabs.treex.data.local.AppDatabase
 import ru.hdlabs.treex.data.local.PersonEntity
 import ru.hdlabs.treex.data.local.UnionEntity
 import ru.hdlabs.treex.domain.OpenLink
@@ -40,8 +42,17 @@ object TreeSnapshotRenderer {
         val unusedOpenLinks = openLinks
         @Suppress("UNUSED_PARAMETER")
         val unusedHome = homePersonId
+        @Suppress("UNUSED_PARAMETER")
+        val unusedUnions = unions
         val density = context.resources.displayMetrics.density.coerceIn(1.5f, 4f)
-        val graph = GenealogyGraphMapper.fromEntities(people, unions)
+        val db = AppDatabase.getInstance(context)
+        val graph = runBlocking {
+            GenealogyGraphMapper.fromFamilies(
+                people,
+                db.familyDao().all(),
+                db.familyChildDao().all(),
+            )
+        }
         val layout = SugiyamaLayout.layout(graph)
         val livingById = people.filter { !it.vacant }.associateBy { it.id }
         val bitmap = renderBitmap(layout, livingById, density)

@@ -2,7 +2,12 @@ package ru.hdlabs.treex.data.local
 
 import androidx.room.Entity
 import androidx.room.PrimaryKey
+import kotlin.DeprecationLevel
 
+@Deprecated(
+    message = "Use FamilyEntity/FamilyChildEntity",
+    level = DeprecationLevel.WARNING,
+)
 @Entity(tableName = "unions")
 data class UnionEntity(
     @PrimaryKey val id: String,

@@ -111,6 +111,8 @@ class TreeRepository(
     }
     private val peopleDao = database.personDao()
     private val unionDao = database.unionDao()
+    private val familyDao = database.familyDao()
+    private val familyChildDao = database.familyChildDao()
     private val mutex = Mutex()
     private val gitMutex = Mutex()
     private var generation = 0
@@ -173,7 +175,11 @@ class TreeRepository(
 
     /** Read-model snapshot for genealogy graph (phase 1); not used by UI yet. */
     suspend fun buildGraphSnapshot(): GenealogyGraph = mutex.withLock {
-        GenealogyGraphMapper.fromEntities(peopleDao.all(), unionDao.all())
+        GenealogyGraphMapper.fromFamilies(
+            peopleDao.all(),
+            familyDao.all(),
+            familyChildDao.all(),
+        )
     }
 
     suspend fun previewDeletePerson(id: String): DeletePersonImpact? = mutex.withLock {
