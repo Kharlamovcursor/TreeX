@@ -1,9 +1,7 @@
 package ru.hdlabs.treex.domain
 
-import ru.hdlabs.treex.backup.FamilyBackupMapper
-import ru.hdlabs.treex.backup.UnionRecord
-import ru.hdlabs.treex.backup.hasBothPartners
-import ru.hdlabs.treex.backup.partnerIds
+import ru.hdlabs.treex.data.local.FamilyChildEntity
+import ru.hdlabs.treex.data.local.FamilyEntity
 import ru.hdlabs.treex.data.local.PersonEntity
 import ru.hdlabs.treex.domain.graph.GenealogyGraphMapper
 
@@ -17,39 +15,38 @@ data class DataIssue(
 object TreeDataValidator {
     fun validate(
         people: List<PersonEntity>,
-        unions: List<UnionRecord>,
+        families: List<FamilyEntity>,
+        familyChildren: List<FamilyChildEntity>,
     ): List<DataIssue> {
         val issues = mutableListOf<DataIssue>()
         val ids = people.map { it.id }.toSet()
         val living = people.filter { !it.vacant }
-        val byId = people.associateBy { it.id }
-        val (families, children) = FamilyBackupMapper.fromUnionRecords(unions)
-        val graph = GenealogyGraphMapper.fromFamilies(people, families, children)
+        val graph = GenealogyGraphMapper.fromFamilies(people, families, familyChildren)
         val parentMap = living.associate { person ->
             val fam = graph.familyWhereChild(person.id)
             person.id to (fam?.partnerAId to fam?.partnerBId)
         }
 
-        unions.forEach { union ->
-            union.partnerIds().forEach { id ->
+        families.forEach { fam ->
+            listOfNotNull(fam.partnerAId, fam.partnerBId).forEach { id ->
                 if (id !in ids) {
                     issues += DataIssue(
                         "missing_ref",
-                        "В союзе ${union.id} указан партнёр $id, которого нет в древе.",
-                        unionIds = listOf(union.id),
+                        "В семье ${fam.id} указан партнёр $id, которого нет в древе.",
+                        unionIds = listOf(fam.id),
                         personIds = listOf(id),
                     )
                 }
             }
-            union.childIds.forEach { childId ->
-                if (childId !in ids) {
-                    issues += DataIssue(
-                        "missing_ref",
-                        "В союзе ${union.id} указан ребёнок $childId, которого нет в древе.",
-                        unionIds = listOf(union.id),
-                        personIds = listOf(childId),
-                    )
-                }
+        }
+        familyChildren.forEach { row ->
+            if (row.childId !in ids) {
+                issues += DataIssue(
+                    "missing_ref",
+                    "В семье ${row.familyId} указан ребёнок ${row.childId}, которого нет в древе.",
+                    unionIds = listOf(row.familyId),
+                    personIds = listOf(row.childId),
+                )
             }
         }
 
@@ -75,15 +72,17 @@ object TreeDataValidator {
             }
         }
 
-        val spousePairs = unions.filter { it.hasBothPartners() && it.childIds.isEmpty() }
+        val spouseFamilies = families.filter { it.partnerAId != null && it.partnerBId != null }
+        spouseFamilies
             .groupBy { coupleKey(it.partnerAId!!, it.partnerBId!!) }
-        spousePairs.filter { it.value.size > 1 }.forEach { (_, list) ->
-            issues += DataIssue(
-                "duplicate_spouse",
-                "Дублируется брачный союз ${list.first().partnerAId}–${list.first().partnerBId}.",
-                unionIds = list.map { it.id },
-            )
-        }
+            .filter { it.value.size > 1 }
+            .forEach { (_, list) ->
+                issues += DataIssue(
+                    "duplicate_spouse",
+                    "Дублируется брачный союз ${list.first().partnerAId}–${list.first().partnerBId}.",
+                    unionIds = list.map { it.id },
+                )
+            }
 
         living.forEach { person ->
             if (person.birthDate.isNotBlank() && person.deathDate.isNotBlank()) {

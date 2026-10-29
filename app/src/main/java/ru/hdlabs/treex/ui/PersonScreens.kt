@@ -72,7 +72,7 @@ import ru.hdlabs.treex.domain.fullName
 import ru.hdlabs.treex.domain.isVacantSlot
 import ru.hdlabs.treex.domain.lifeLine
 import ru.hdlabs.treex.domain.parseSpouseDrafts
-import ru.hdlabs.treex.domain.halfSiblingCaption
+import ru.hdlabs.treex.data.halfSiblingCaption
 import ru.hdlabs.treex.domain.SiblingGroups
 import ru.hdlabs.treex.domain.spouseNoun
 import ru.hdlabs.treex.domain.suggestPatronymic
@@ -714,7 +714,7 @@ fun PersonDetailScreen(personId: String, nav: NavHostController) {
                         "Сводный родственник",
                         half,
                         nav,
-                        ", ${halfSiblingCaption(person, half, tree.unions, tree.people)}",
+                        ", ${tree.halfSiblingCaption(person, half)}",
                     )
                 }
             }

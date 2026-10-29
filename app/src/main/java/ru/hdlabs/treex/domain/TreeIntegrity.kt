@@ -2,6 +2,8 @@ package ru.hdlabs.treex.domain
 
 import ru.hdlabs.treex.backup.UnionRecord
 import ru.hdlabs.treex.backup.partnerIds
+import ru.hdlabs.treex.data.local.FamilyChildEntity
+import ru.hdlabs.treex.data.local.FamilyEntity
 import ru.hdlabs.treex.data.local.PersonEntity
 
 /** Keeps layout and kin lines aligned with living people only (no vacant ghosts). */
@@ -13,6 +15,28 @@ object TreeIntegrity {
 
     fun livingIds(people: List<PersonEntity>): Set<String> =
         livingPeople(people).map { it.id }.toSet()
+
+    fun livingFamilies(
+        families: List<FamilyEntity>,
+        familyChildren: List<FamilyChildEntity>,
+        people: List<PersonEntity>,
+    ): Pair<List<FamilyEntity>, List<FamilyChildEntity>> {
+        val byId = people.associateBy { it.id }
+        val living = livingIds(people)
+        val childrenByFamily = familyChildren.groupBy { it.familyId }
+        val keptFamilies = families.filter { fam ->
+            val partners = listOfNotNull(fam.partnerAId, fam.partnerBId).filter { it in living }
+            val children = childrenByFamily[fam.id].orEmpty().map { it.childId }.filter { it in living }
+            when {
+                partners.size >= 2 -> partners.all { id -> byId[id]?.let { isLiving(it) } == true }
+                partners.size == 1 && children.isNotEmpty() ->
+                    byId[partners.single()]?.let { isLiving(it) } == true
+                else -> false
+            }
+        }.map { it.id }.toSet()
+        val keptChildren = familyChildren.filter { it.familyId in keptFamilies && it.childId in living }
+        return families.filter { it.id in keptFamilies } to keptChildren
+    }
 
     fun livingUnions(unions: List<UnionRecord>, people: List<PersonEntity>): List<UnionRecord> {
         val byId = people.associateBy { it.id }

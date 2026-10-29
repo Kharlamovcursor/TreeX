@@ -39,7 +39,10 @@ object DiagnosticReport {
             appendLine()
             appendLine("=== Древо (без персональных данных) ===")
             appendLine("Карточек: ${state.people.size}, с именами: $living")
-            appendLine("Связей супругов: ${state.unions.size}")
+            appendLine(
+                "Семей (союзов/родительских связей): ${state.families.size}, " +
+                    "детско-родительских привязок: ${state.familyChildren.size}",
+            )
             appendLine("Git: $gitLabel")
             appendLine()
             appendLine("=== Последние события ===")
