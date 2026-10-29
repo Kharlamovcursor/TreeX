@@ -9,6 +9,7 @@
 .cxx
 app/build
 .kotlin/
+/vendor/
 /app/release
 keystore.properties
 signing-credentials.local.txt

@@ -41,7 +41,7 @@ class UnionErCompactTest {
     }
 
     @Test
-    fun layoutLinesOneGroupPerSiblingRow() {
+    fun siblingsShareOneUnion() {
         val people = listOf(
             PersonEntity(id = "f", gender = "m", birthDate = "1970-01-01"),
             PersonEntity(id = "m", gender = "f", birthDate = "1972-01-01"),
@@ -50,8 +50,7 @@ class UnionErCompactTest {
         )
         val unions = listOf(UnionEntity("u", "f", "m", childIds = "a,b"))
         val compact = UnionEr.compactUnions(people, unions)
-        val placed = TreeLayout.place(people, compact)
-        assertEquals(1, placed.childGroups.size)
-        assertTrue(placed.childGroups.single().childIds.containsAll(listOf("a", "b")))
+        assertEquals(1, compact.size)
+        assertTrue(compact.single().childIdsList().containsAll(listOf("a", "b")))
     }
 }

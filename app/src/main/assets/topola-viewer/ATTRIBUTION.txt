@@ -1,0 +1,7 @@
+Topola Genealogy Viewer
+https://github.com/PeWu/topola-viewer
+Copyright (c) Piotr Węgrzynowski and contributors
+Licensed under the Apache License, Version 2.0
+
+Bundled static build (VITE_GOOGLE_ANALYTICS=false) for offline tree visualization in TreeX.
+Rebuild: clone topola-viewer, npm ci, set VITE_GOOGLE_ANALYTICS=false, npm run build, copy dist/ here.

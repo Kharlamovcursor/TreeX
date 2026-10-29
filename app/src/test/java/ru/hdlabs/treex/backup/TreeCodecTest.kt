@@ -6,7 +6,6 @@ import org.junit.Test
 import ru.hdlabs.treex.data.local.PersonEntity
 import ru.hdlabs.treex.data.local.UnionEntity
 import ru.hdlabs.treex.domain.SpouseDraft
-import ru.hdlabs.treex.domain.TreeLayout
 import ru.hdlabs.treex.domain.TreeRules
 import ru.hdlabs.treex.domain.mergePerson
 import ru.hdlabs.treex.domain.mergeSpouseDrafts
@@ -102,20 +101,6 @@ class TreeCodecTest {
         }.exceptionOrNull()
         assertTrue(error is IllegalArgumentException)
         assertTrue(error?.message.orEmpty().contains("новой"))
-    }
-
-    @Test
-    fun spouseWithoutParentsStandsInTheSameGeneration() {
-        val bands = TreeLayout.bands(
-            listOf(
-                PersonEntity(id = "f", lastName = "Старший"),
-                PersonEntity(id = "c", lastName = "Младший", fatherId = "f"),
-                PersonEntity(id = "s", lastName = "Супруга"),
-            ),
-            listOf(UnionEntity("u-c-s", "c", "s")),
-        )
-        assertEquals(listOf("f"), bands[0].map { it.id })
-        assertEquals(setOf("c", "s"), bands[1].map { it.id }.toSet())
     }
 
     @Test

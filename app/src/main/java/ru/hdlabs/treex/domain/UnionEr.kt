@@ -3,7 +3,9 @@ package ru.hdlabs.treex.domain
 import ru.hdlabs.treex.data.local.PersonEntity
 import ru.hdlabs.treex.data.local.UnionEntity
 
-/** Person → Union → children. One canonical union list for layout and lines. */
+/** Person → Union → children. One canonical union list for kinship and GEDCOM export. */
+
+data class ChildGroup(val parentIds: List<String>, val childIds: List<String>)
 
 fun UnionEntity.childIdsList(): List<String> =
     if (childIds.isBlank()) emptyList() else childIds.split(',').map { it.trim() }.filter { it.isNotEmpty() }

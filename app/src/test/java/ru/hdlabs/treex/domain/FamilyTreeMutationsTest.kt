@@ -44,7 +44,7 @@ class FamilyTreeMutationsTest {
     }
 
     @Test
-    fun layoutUsesUnionChildrenIds() {
+    fun unionStoresChildIds() {
         val people = listOf(
             PersonEntity(id = "h", gender = "m", birthDate = "1990-01-01"),
             PersonEntity(id = "w", gender = "f", birthDate = "1991-01-01"),
@@ -53,8 +53,6 @@ class FamilyTreeMutationsTest {
         val unions = listOf(
             UnionEntity(id = "u", partnerAId = "h", partnerBId = "w", childIds = "c"),
         )
-        val placed = TreeLayout.place(people, unions)
-        assertEquals(1, placed.childGroups.size)
-        assertEquals(listOf("c"), placed.childGroups.single().childIds.sorted())
+        assertEquals(listOf("c"), unions.single().childIdsList())
     }
 }
