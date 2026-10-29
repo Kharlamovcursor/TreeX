@@ -293,7 +293,19 @@ fun SettingsScreen(nav: NavHostController) {
             ) { wipeStep = 1 }
         }
         Spacer(Modifier.height(12.dp))
-        HdSecondaryButton("Инструкция") { nav.navigate(Routes.USER_GUIDE) }
+            if (settings.homePersonId.isNotBlank()) {
+                Spacer(Modifier.height(8.dp))
+                HdSecondaryButton("Моя карточка в древе") {
+                    nav.navigate(Routes.person(settings.homePersonId))
+                }
+                Text(
+                    "Добавление супруга, родителей и детей — с карточки на древе (не в этом экране).",
+                    color = HdTextSecondary,
+                    modifier = Modifier.padding(top = 6.dp),
+                )
+            }
+            Spacer(Modifier.height(8.dp))
+            HdSecondaryButton("Инструкция") { nav.navigate(Routes.USER_GUIDE) }
         Spacer(Modifier.height(12.dp))
         HdSecondaryButton("Настройки разработчика") { nav.navigate(Routes.DEVELOPER_SETTINGS) }
     }

@@ -474,6 +474,19 @@ fun PersonEditorScreen(routeId: String, role: String, anchor: String, nav: NavHo
                     )
                 }
                 HdSecondaryButton(addSpouseLabel(gender)) { picker = Picker.Spouse }
+                if (creating && role == "spouse" && anchor.isNotBlank()) {
+                    Text(
+                        "Супруг будет связан с ${tree.people.find { it.id == anchor }?.fullName() ?: "карточкой на древе"}.",
+                        color = HdTextSecondary,
+                        modifier = Modifier.padding(top = 6.dp),
+                    )
+                }
+                if (!creating || role != "spouse") {
+                    Spacer(Modifier.height(8.dp))
+                    HdSecondaryButton(addSpouseLabel(gender) + " (новая карточка)") {
+                        nav.navigate(Routes.edit("new", "spouse", personId))
+                    }
+                }
             }
             Spacer(Modifier.height(12.dp))
             HdCard {
@@ -755,10 +768,10 @@ fun PersonDetailScreen(personId: String, nav: NavHostController) {
             title = { Text(if (person.isVacantSlot()) "Убрать пустое место?" else "Удалить карточку?") },
             text = {
                 Text(
-                    deleteImpact?.summary ?: if (person.isVacantSlot()) {
+                    deleteImpact?.summary ?:                     if (person.isVacantSlot()) {
                         "Место исчезнет с древа. Снимок сохранится в истории."
                     } else {
-                        "Карточка станет пустым местом: древо и связи на месте. Снимок сохранится в истории."
+                        "Карточка будет удалена. Связанные люди и их связи останутся; при необходимости их можно восстановить через «Свободные связи»."
                     },
                     color = HdTextSecondary,
                 )

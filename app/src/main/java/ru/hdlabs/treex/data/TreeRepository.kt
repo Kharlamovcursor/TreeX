@@ -42,6 +42,7 @@ import ru.hdlabs.treex.domain.siblingsMissingParent
 import ru.hdlabs.treex.domain.DataIssue
 import ru.hdlabs.treex.domain.DeletePersonImpact
 import ru.hdlabs.treex.domain.FamilyTreeMutations
+import ru.hdlabs.treex.domain.KinshipPersistence
 import ru.hdlabs.treex.domain.KinshipSync
 import ru.hdlabs.treex.domain.TreeDataValidator
 import ru.hdlabs.treex.domain.TreeIntegrity
@@ -331,7 +332,9 @@ class TreeRepository(
                         fatherId = null,
                         motherId = null,
                     )
-                    else -> baseClean.copy(fatherId = null, motherId = null)
+                    "father", "mother", "spouse", "child", "son", "daughter" ->
+                        baseClean.copy(fatherId = null, motherId = null)
+                    else -> baseClean
                 }
                 val unionSnapshot = UnionEr.reconcileChildMembership(existing, unionDao.all())
                 val projectedUnions = if (linkRole != null && anchor != null) {
@@ -386,27 +389,18 @@ class TreeRepository(
                             updatedAtMillis = now,
                         ),
                     )
-                    val kept = unionDao.all().filter { union ->
-                        when {
-                            clean.id !in union.partnerIds() -> true
-                            union.childIdsList().isNotEmpty() -> true
-                            union.hasBothPartners() && union.childIdsList().isEmpty() -> false
-                            else -> true
-                        }
-                    }
-                    val created = nextSpouses.map { spouse ->
-                        val a = minOf(clean.id, spouse.personId)
-                        val b = maxOf(clean.id, spouse.personId)
-                        UnionEntity(id = stableUnionId(a, b), partnerAId = a, partnerBId = b, marriedOn = spouse.marriedOn.trim())
-                    }
-                    val afterAttach = if (linkRole != null && anchor != null) {
-                        UnionErAttach.applyRelativeAttach(peopleDao.all(), kept + created, anchor.id, linkRole, clean)
-                    } else {
-                        kept + created
-                    }
-                    val unionsWithParents = mergeInferredParentUnions(afterAttach, peopleDao.all())
+                    val allPeople = peopleDao.all()
+                    val attachForUnion = attach?.takeIf { linkRole != null && anchor != null }
+                    val unionsFinal = KinshipPersistence.rebuildUnions(
+                        people = allPeople,
+                        existingUnions = unionDao.all(),
+                        focusPersonId = clean.id,
+                        spouseDrafts = nextSpouses,
+                        attach = attachForUnion,
+                        focusPerson = clean,
+                    )
                     unionDao.deleteAll()
-                    unionDao.upsertAll(unionsWithParents)
+                    unionDao.upsertAll(unionsFinal)
                     syncLegacyParentFieldsLocked()
                     generation += 1
                     if (snapshot) snapshotLocked(readLocked())
@@ -434,11 +428,11 @@ class TreeRepository(
                 snapshotLocked(readLocked())
                 val people = peopleDao.all()
                 val removed = people.find { it.id == id } ?: return@withTransaction
-                if (removed.vacant) {
-                    purgePersonLocked(removed, people)
-                } else {
-                    vacatePersonLocked(removed)
-                }
+                purgePersonLocked(removed, people)
+                val remaining = peopleDao.all()
+                unionDao.deleteAll()
+                unionDao.upsertAll(UnionEr.compactUnions(remaining, unionDao.all()))
+                syncLegacyParentFieldsLocked()
             }
         }
         schedulePush()
