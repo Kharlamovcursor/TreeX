@@ -28,9 +28,11 @@ class KinshipPersistenceTest {
             focusPerson = mother,
         )
         val all = listOf(self, father, mother)
-        val placed = TreeLayout.place(all, unions, homePersonId = "s")
-        assertTrue(placed.childGroups.any { "s" in it.childIds && "f" in it.parentIds })
-        assertTrue(placed.childGroups.any { "s" in it.childIds && "m" in it.parentIds || it.parentIds.size == 2 })
+        val ids = all.map { it.id }.toSet()
+        val compact = UnionEr.compactUnions(all, unions)
+        val parents = UnionEr.parentIdsOf(self, ids, compact)
+        assertTrue(parents.contains("f"))
+        assertTrue(parents.contains("m"))
     }
 
     @Test

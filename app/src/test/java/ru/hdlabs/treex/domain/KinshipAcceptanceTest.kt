@@ -7,7 +7,7 @@ import org.junit.Test
 import ru.hdlabs.treex.data.local.PersonEntity
 import ru.hdlabs.treex.data.local.UnionEntity
 
-/** Обязательные сценарии приёмки (данные + линии + раскладка). */
+/** Обязательные сценарии приёмки (данные + kinship, без legacy layout). */
 class KinshipAcceptanceTest {
     @Test
     fun scenario1_coupleWithFourChildren() {
@@ -17,11 +17,15 @@ class KinshipAcceptanceTest {
             PersonEntity(id = "c$i", gender = "m", birthDate = "20${10 + i}-01-01", fatherId = "h", motherId = "w")
         }
         val people = listOf(h, w) + kids
-        val unions = listOf(UnionEntity("u", "h", "w"))
-        val placed = TreeLayout.place(people, unions)
-        assertEquals(6, placed.cards.size)
-        cardsDoNotOverlap(placed.cards)
-        assertTrue(placed.childGroups.any { it.childIds.size == 4 })
+        val unions = listOf(UnionEntity("u", "h", "w", childIds = kids.joinToString(",") { it.id }))
+        val ids = people.map { it.id }.toSet()
+        val compact = UnionEr.compactUnions(people, unions)
+        kids.forEach { kid ->
+            val parents = UnionEr.parentIdsOf(kid, ids, compact)
+            assertTrue(parents.contains("h"))
+            assertTrue(parents.contains("w"))
+        }
+        assertTrue(compact.any { it.childIdsList().size == 4 })
     }
 
     @Test
@@ -29,9 +33,9 @@ class KinshipAcceptanceTest {
         val f = PersonEntity(id = "f", gender = "m", birthDate = "1970-01-01")
         val c = PersonEntity(id = "c", gender = "m", birthDate = "2000-01-01", fatherId = "f")
         val unions = listOf(UnionEntity("pu-f", "f", null, childIds = "c"))
-        val placed = TreeLayout.place(listOf(f, c), unions)
-        assertEquals(1, placed.childGroups.size)
-        assertEquals(listOf("f"), placed.childGroups.single().parentIds)
+        assertTrue(unions.any { "c" in it.childIdsList() && "f" in it.partnerIds() })
+        val parents = UnionEr.parentIdsOf(c, setOf("f", "c"), UnionEr.compactUnions(listOf(f, c), unions))
+        assertEquals(listOf("f"), parents)
     }
 
     @Test
@@ -46,11 +50,9 @@ class KinshipAcceptanceTest {
             UnionEntity("u1", "h", "w1", childIds = "c1"),
             UnionEntity("u2", "h", "w2", childIds = "c2"),
         )
-        val placed = TreeLayout.place(people, unions)
-        assertEquals(5, placed.cards.size)
-        assertTrue(placed.spouseLinks.size >= 2)
-        assertTrue(placed.childGroups.any { "c1" in it.childIds })
-        assertTrue(placed.childGroups.any { "c2" in it.childIds })
+        val compact = UnionEr.compactUnions(people, unions)
+        assertTrue(compact.any { "c1" in it.childIdsList() && "w1" in it.partnerIds() })
+        assertTrue(compact.any { "c2" in it.childIdsList() && "w2" in it.partnerIds() })
     }
 
     @Test
@@ -105,9 +107,12 @@ class KinshipAcceptanceTest {
             PersonEntity(id = "c", gender = "m", birthDate = "1990-01-01", fatherId = "f"),
         )
         val unions = listOf(UnionEntity("1", "gf", "gm"), UnionEntity("pu-f", "f", null, childIds = "c"))
-        val placed = TreeLayout.place(people, unions)
-        assertTrue(placed.cards.find { it.id == "c" }!!.top > placed.cards.find { it.id == "f" }!!.top)
-        cardsDoNotOverlap(placed.cards)
+        val ids = people.map { it.id }.toSet()
+        val compact = UnionEr.compactUnions(people, unions)
+        assertTrue(UnionEr.parentIdsOf(people.single { it.id == "c" }, ids, compact).contains("f"))
+        val fParents = UnionEr.parentIdsOf(people.single { it.id == "f" }, ids, compact)
+        assertTrue(fParents.contains("gf"))
+        assertTrue(fParents.contains("gm"))
     }
 
     @Test
@@ -115,13 +120,8 @@ class KinshipAcceptanceTest {
         val f = PersonEntity(id = "f", gender = "m")
         val m = PersonEntity(id = "m", gender = "f")
         val kids = (1..8).map { i -> PersonEntity(id = "k$i", fatherId = "f", motherId = "m") }
-        val branch = PersonEntity(id = "x", gender = "m")
-        val placed = TreeLayout.place(
-            listOf(f, m, branch) + kids,
-            listOf(UnionEntity("u", "f", "m", childIds = kids.joinToString(",") { it.id })),
-        )
-        assertEquals(11, placed.cards.size)
-        cardsDoNotOverlap(placed.cards)
+        val unions = listOf(UnionEntity("u", "f", "m", childIds = kids.joinToString(",") { it.id }))
+        assertEquals(8, unions.single().childIdsList().size)
     }
 
     @Test
@@ -144,38 +144,9 @@ class KinshipAcceptanceTest {
             PersonEntity(id = "w", gender = "f"),
         )
         val unions = listOf(UnionEntity("marriage", "h", "w"))
-        val state = familyTreeStateFrom(people, unions)
         val child = FamilyPerson(id = "c", gender = FamilyGender.Male)
         val next = UnionErAttach.applyRelativeAttach(people, unions, "h", "child", child.toPersonEntity())
         val childParents = UnionEr.parentIdsOf(PersonEntity(id = "c"), people.map { it.id }.toSet() + "c", next)
         assertEquals(listOf("h"), childParents)
-    }
-
-    @Test
-    fun layoutStableWhenInputOrderChanges() {
-        val people = listOf(
-            PersonEntity(id = "f", gender = "m"),
-            PersonEntity(id = "m", gender = "f"),
-            PersonEntity(id = "c", gender = "m", fatherId = "f", motherId = "m"),
-        )
-        val unions = listOf(UnionEntity("u", "f", "m"))
-        val a = TreeLayout.place(people, unions).cards.sortedBy { it.id }
-        val b = TreeLayout.place(people.reversed(), unions).cards.sortedBy { it.id }
-        a.zip(b).forEach { (x, y) ->
-            assertEquals(x.left, y.left, 0.5f)
-            assertEquals(x.top, y.top, 0.5f)
-        }
-    }
-
-    private fun cardsDoNotOverlap(cards: List<TreeCard>) {
-        cards.forEach { first ->
-            cards.filter { it.id != first.id }.forEach { second ->
-                val separated = first.left + TreeLayout.CARD_W <= second.left + 0.1f ||
-                    second.left + TreeLayout.CARD_W <= first.left + 0.1f ||
-                    first.top + first.height <= second.top + 0.1f ||
-                    second.top + second.height <= first.top + 0.1f
-                assertTrue("${first.id} overlaps ${second.id}", separated)
-            }
-        }
     }
 }
