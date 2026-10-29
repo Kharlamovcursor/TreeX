@@ -16,11 +16,15 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import android.util.Log
+import android.widget.Toast
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavHostController
+import ru.hdlabs.treex.BuildConfig
 import ru.hdlabs.treex.TreeXApplication
 import ru.hdlabs.treex.diagnostic.AppEventLog
+import ru.hdlabs.treex.diagnostic.DiagnosticShare
 import ru.hdlabs.treex.navigation.Routes
 import ru.hdlabs.treex.ui.components.HdLabsBrandTitle
 import ru.hdlabs.treex.ui.components.HdPrimaryButton
@@ -57,7 +61,7 @@ fun TreeScreen(nav: NavHostController, highlight: String = "") {
                 Modifier.fillMaxSize(),
                 contentAlignment = Alignment.Center,
             ) {
-                CircularProgressIndicator()
+                    Text("Dump diagnostics", color = HdOrange)
             }
             is TreeUiState.Error -> Column(
                 Modifier.fillMaxSize().padding(16.dp),

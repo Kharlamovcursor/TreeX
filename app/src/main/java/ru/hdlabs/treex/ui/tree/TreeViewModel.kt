@@ -1,5 +1,7 @@
 package ru.hdlabs.treex.ui.tree
 
+import android.content.Context
+import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -9,6 +11,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import ru.hdlabs.treex.data.TreeRepository
 import ru.hdlabs.treex.domain.graph.SaveBlockedException
+import java.io.File
 
 class TreeViewModel(
     private val treeRepository: TreeRepository,
@@ -31,6 +34,10 @@ class TreeViewModel(
         val prevTransform = (_state.value as? TreeUiState.Ready)?.transform
         if (!preserveTransform) {
             _state.value = TreeUiState.Loading
+    /** Writes current [state] to app-private storage (debug builds). */
+    fun dumpDiagnostics(context: Context): File =
+        TreeDiagnosticsDump.dumpDiagnostics(context, _state.value)
+
         }
         try {
             val ready = TreeReadyBuilder.build(treeRepository.buildGraphSnapshot())
