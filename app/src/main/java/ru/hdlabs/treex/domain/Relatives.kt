@@ -64,18 +64,12 @@ fun suggestedParentFamilyName(host: PersonEntity): String = when (host.gender) {
     else -> host.lastName.trim()
 }
 
-fun spouseDraftsOf(
-    graph: GenealogyGraph,
-    personId: String,
-    families: List<FamilyEntity> = emptyList(),
-): List<SpouseDraft> {
-    val meta = families.associateBy { it.id }
-    return graph.familiesOf(personId).mapNotNull { fam ->
+fun spouseDraftsOf(graph: GenealogyGraph, personId: String): List<SpouseDraft> =
+    graph.familiesOf(personId).mapNotNull { fam ->
         val otherId = when (personId) {
             fam.partnerAId -> fam.partnerBId
             fam.partnerBId -> fam.partnerAId
             else -> null
         } ?: return@mapNotNull null
-        SpouseDraft(otherId, meta[fam.id]?.marriedOn.orEmpty())
+        SpouseDraft(otherId, marriedOn = "")
     }.distinctBy { it.personId }
-}
