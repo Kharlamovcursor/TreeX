@@ -1,7 +1,0 @@
-relatives-tree
-https://github.com/SanichKotikov/relatives-tree
-Copyright (c) Sanich Kotikov
-Licensed under the MIT License
-
-Bundled as calc-tree.js for layout coordinates (nodes + connectors).
-Reference TS module: app/genealogy-tree/

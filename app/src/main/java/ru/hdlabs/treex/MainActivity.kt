@@ -16,7 +16,6 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         val app = application as TreeXApplication
-        app.container.relativesTreeEngine.attach(this)
         setContent {
             val settings by app.container.settingsRepository.settings.collectAsStateWithLifecycle(AppSettings())
             HdLabsTheme(darkTheme = !settings.lightTheme) {

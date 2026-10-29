@@ -91,6 +91,7 @@ import ru.hdlabs.treex.ui.theme.HdOrange
 import ru.hdlabs.treex.ui.theme.HdPanelElevated
 import ru.hdlabs.treex.ui.theme.HdTextPrimary
 import ru.hdlabs.treex.ui.theme.HdTextSecondary
+import ru.hdlabs.treex.ui.tree.TreeListStub
 
 @Composable
 fun TreeScreen(nav: NavHostController, highlight: String) {
@@ -357,72 +358,13 @@ fun TreeScreen(nav: NavHostController, highlight: String) {
                     }
                 }
                 else -> {
-                    RelativesTreeView(
+                    TreeListStub(
                         people = state.people,
-                        unions = state.unions,
-                        openLinks = openLinks,
                         selectedId = focusId,
                         freshId = activeHighlight,
-                        centerToken = centerToken,
-                        pendingLinkId = pendingLinkId,
-                        detachedBranchIds = detachedBranchIds,
-                        homePersonId = settings.homePersonId,
-                        compactChrome = landscape,
                         modifier = Modifier.weight(1f),
-                        onSelect = { person ->
-                            val branchPick = pendingBranchConnect
-                            if (branchPick != null) {
-                                if (person.id == branchPick.first) {
-                                    updatedMessage = "Выберите карточку на основном древе, не эту же."
-                                    return@RelativesTreeView
-                                }
-                                pendingBranchConnect = null
-                                scope.launch {
-                                    runCatching {
-                                        app.container.treeRepository.connectBranchToTree(
-                                            branchPick.first,
-                                            person.id,
-                                            branchPick.second,
-                                        )
-                                    }.onSuccess {
-                                        updatedMessage = "Ветка связана с древом."
-                                        centerToken += 1
-                                    }.onFailure { error ->
-                                        updatedMessage = error.message ?: "Не удалось связать ветку"
-                                    }
-                                }
-                                return@RelativesTreeView
-                            }
-                            val linkId = pendingLinkId
-                            if (linkId != null) {
-                                val link = openLinks.find { it.id == linkId }
-                                if (link != null && link.slot in setOf("father", "mother") && !acceptsAsParent(link.slot, person)) {
-                                    updatedMessage = if (link.slot == "father") {
-                                        "Для отца выберите мужскую карточку."
-                                    } else {
-                                        "Для матери выберите женскую карточку."
-                                    }
-                                    return@RelativesTreeView
-                                }
-                                pendingLinkId = null
-                                scope.launch {
-                                    runCatching {
-                                        app.container.treeRepository.attachOpenLink(linkId, person.id)
-                                    }.onFailure { error ->
-                                        updatedMessage = error.message ?: "Не удалось прикрепить связь"
-                                    }
-                                }
-                                if (person.isVacantSlot()) {
-                                    nav.navigate(Routes.edit(person.id))
-                                }
-                            } else {
-                                focusId = person.id
-                                actionsExpanded = false
-                                centerToken += 1
-                            }
-                        },
+                        onPersonClick = onPersonPickedFromSearch,
                         onOpenDetail = { nav.navigate(Routes.person(it.id)) },
-                        onHoldLink = { pendingLinkId = it },
                     )
                     if (focus != null && !landscape) {
                         if (actionsExpanded) {

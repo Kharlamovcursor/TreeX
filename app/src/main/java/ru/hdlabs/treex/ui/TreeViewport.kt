@@ -10,7 +10,7 @@ import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import kotlin.math.abs
 
-/** Pinch-zoom and drag-pan for tree canvases (FamilyTree, RelativesTreeView). */
+/** Pinch-zoom and drag-pan for tree canvases (legacy FamilyTree until phase 0b). */
 internal fun Modifier.treeViewportTransform(
     onGesture: (zoom: Float, pan: Offset, centroid: Offset) -> Unit,
 ): Modifier = pointerInput(Unit) {

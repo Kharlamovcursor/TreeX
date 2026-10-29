@@ -7,12 +7,10 @@ import kotlinx.coroutines.SupervisorJob
 import ru.hdlabs.treex.data.TreeRepository
 import ru.hdlabs.treex.data.local.AppDatabase
 import ru.hdlabs.treex.data.settings.SettingsRepository
-import ru.hdlabs.treex.relatives.RelativesTreeJsEngine
 import ru.hdlabs.treex.update.GitHubUpdateSource
 
 class AppContainer(context: Context) {
     private val appContext = context.applicationContext
-    val relativesTreeEngine = RelativesTreeJsEngine()
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     val settingsRepository = SettingsRepository(appContext)
     val treeRepository = TreeRepository(
