@@ -104,6 +104,22 @@ class TreeCodecTest {
     }
 
     @Test
+    fun gedcomExportsSingleParentUnionWithChild() {
+        val document = TreeDocument(
+            people = listOf(
+                PersonRecord(id = "f", lastName = "Иванов", firstName = "Иван", gender = "m"),
+                PersonRecord(id = "c", lastName = "Иванов", firstName = "Пётр", gender = "m", fatherId = "f"),
+            ),
+            unions = listOf(UnionRecord(id = "pu-f", partnerAId = "f", childIds = listOf("c"))),
+        )
+        val gedcom = GedcomCodec.export(document)
+        assertTrue(gedcom.contains("@f@ INDI"))
+        assertTrue(gedcom.contains("@c@ INDI"))
+        assertTrue(gedcom.contains("1 HUSB @f@") || gedcom.contains("1 HUSB @F@"))
+        assertTrue(gedcom.contains("1 CHIL @c@"))
+    }
+
+    @Test
     fun childCannotBecomeParentOfAncestor() {
         val parents = mapOf("a" to (null to null), "b" to ("a" to null))
         assertTrue(TreeRules.createsCycle(parents, "a", "b", null))

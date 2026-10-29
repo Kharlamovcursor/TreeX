@@ -57,17 +57,33 @@ object GedcomCodec {
         val families = linkedMapOf<String, Family>()
         doc.people.forEach { person ->
             if (person.fatherId == null && person.motherId == null) return@forEach
-            val key = "${person.fatherId.orEmpty()}|${person.motherId.orEmpty()}"
+            val key = familyKey(person.fatherId, person.motherId)
             val family = families.getOrPut(key) { Family(person.fatherId, person.motherId) }
             family.children += person.id
         }
         doc.unions.forEach { union ->
-            val a = people[union.partnerAId] ?: return@forEach
-            val b = people[union.partnerBId] ?: return@forEach
-            val (husband, wife) = roles(a, b)
-            val key = "$husband|$wife"
-            val family = families.getOrPut(key) { Family(husband, wife) }
-            if (family.marriedOn.isBlank()) family.marriedOn = union.marriedOn
+            val children = union.childIds.filter { it in people }
+            val partners = listOfNotNull(union.partnerAId, union.partnerBId).filter { it in people }.distinct()
+            when (partners.size) {
+                0 -> return@forEach
+                1 -> {
+                    val person = people.getValue(partners.single())
+                    val (husband, wife) = singleParentRoles(person)
+                    val key = familyKey(husband, wife)
+                    val family = families.getOrPut(key) { Family(husband, wife) }
+                    family.children += children
+                    if (family.marriedOn.isBlank()) family.marriedOn = union.marriedOn
+                }
+                else -> {
+                    val a = people.getValue(partners[0])
+                    val b = people.getValue(partners[1])
+                    val (husband, wife) = roles(a, b)
+                    val key = familyKey(husband, wife)
+                    val family = families.getOrPut(key) { Family(husband, wife) }
+                    family.children += children
+                    if (family.marriedOn.isBlank()) family.marriedOn = union.marriedOn
+                }
+            }
         }
         families.values.forEachIndexed { index, family ->
             builder.append("0 @F").append(index + 1).append("@ FAM").append('\n')
@@ -148,6 +164,14 @@ object GedcomCodec {
                 unions = unions,
             ),
         )
+    }
+
+    private fun familyKey(husband: String?, wife: String?): String = "${husband.orEmpty()}|${wife.orEmpty()}"
+
+    private fun singleParentRoles(person: PersonRecord): Pair<String?, String?> = when (person.gender) {
+        "f" -> null to person.id
+        "m" -> person.id to null
+        else -> person.id to null
     }
 
     private fun roles(first: PersonRecord, second: PersonRecord): Pair<String?, String?> {

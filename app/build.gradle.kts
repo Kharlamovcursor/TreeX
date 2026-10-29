@@ -29,8 +29,8 @@ android {
         minSdk = 28
         targetSdk = 35
         // 1.0.35 = 1*10000 + 0*100 + 35. Тег релиза: v1.0.35.
-        versionCode = 10046
-        versionName = "1.0.46"
+        versionCode = 10047
+        versionName = "1.0.47"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
