@@ -20,7 +20,7 @@ data class TreePlacement(
 
 /**
  * Layout facade: reads kinship from [PersonEntity]/[UnionEntity], assigns Y via [generationMap],
- * X via [SugiyamaFamilyLayout]. Rendering uses [TreePlacement] only — never infers kinship from pixels.
+ * X via [SugiyamaFamilyLayout] (full recompute each time). Rendering uses [TreePlacement] only.
  */
 object TreeLayout {
     const val CARD_W = 168f

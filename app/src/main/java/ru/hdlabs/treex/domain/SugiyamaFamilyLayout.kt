@@ -1,4 +1,4 @@
-package ru.hdlabs.treex.domain
+﻿package ru.hdlabs.treex.domain
 
 import ru.hdlabs.treex.data.local.PersonEntity
 import ru.hdlabs.treex.data.local.UnionEntity
@@ -107,14 +107,30 @@ internal object SugiyamaFamilyLayout {
         gapX: Float,
     ) {
         val spousePairs = sameGenUnions.map { setOf(it.partnerAId, it.partnerBId) }.toSet()
+        fun shiftBlock(id: String, delta: Float) {
+            if (delta == 0f) return
+            val partners = spousePairs.firstOrNull { id in it }?.toList() ?: listOf(id)
+            partners.forEach { partnerId ->
+                if (partnerId in leftOf) leftOf[partnerId] = leftOf.getValue(partnerId) + delta
+            }
+        }
+
         people.groupBy { generation[it.id] ?: 0 }.values.forEach { band ->
             val ordered = band.sortedBy { leftOf.getValue(it.id) }
             for (index in 1 until ordered.size) {
                 val previous = ordered[index - 1]
                 val current = ordered[index]
-                val gap = if (setOf(previous.id, current.id) in spousePairs) gapX else 44f
-                val minLeft = leftOf.getValue(previous.id) + cardW + gap
-                if (leftOf.getValue(current.id) < minLeft) leftOf[current.id] = minLeft
+                if (setOf(previous.id, current.id) in spousePairs) continue
+                val prevRight = maxOf(
+                    leftOf.getValue(previous.id) + cardW,
+                    spousePairs.firstOrNull { previous.id in it }?.maxOf { leftOf.getValue(it) + cardW } ?: 0f,
+                )
+                val minLeft = prevRight + 44f
+                val currentLeft = minOf(
+                    leftOf.getValue(current.id),
+                    spousePairs.firstOrNull { current.id in it }?.minOf { leftOf.getValue(it) } ?: leftOf.getValue(current.id),
+                )
+                if (currentLeft + 0.1f < minLeft) shiftBlock(current.id, minLeft - currentLeft)
             }
         }
     }

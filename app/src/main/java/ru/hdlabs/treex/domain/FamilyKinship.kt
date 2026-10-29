@@ -84,7 +84,7 @@ internal object FamilyKinship {
 
         val columnA = column(a)
         val columnB = column(b)
-        if (columnA != null && columnB != null && abs(columnA - columnB) > 1f) {
+        if (columnA != null && columnB != null && abs(columnA - columnB) > 0.1f) {
             return if (columnA < columnB) a else b
         }
         if (columnA != null && columnB == null) return a
