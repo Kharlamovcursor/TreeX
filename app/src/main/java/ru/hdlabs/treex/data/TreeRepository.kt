@@ -39,6 +39,7 @@ import ru.hdlabs.treex.domain.stableUnionId
 import ru.hdlabs.treex.domain.SpouseDraft
 import ru.hdlabs.treex.domain.TreeRules
 import ru.hdlabs.treex.domain.siblingsMissingParent
+import ru.hdlabs.treex.domain.TreeIntegrity
 import ru.hdlabs.treex.domain.mergePerson
 import ru.hdlabs.treex.domain.mergeSpouseDrafts
 import ru.hdlabs.treex.domain.spouseDraftsOf
@@ -120,6 +121,30 @@ class TreeRepository(
                     schedulePush()
                 }
             }
+        }
+    }
+
+    /** Clears broken parent links and unions tied to vacant slots (after messy deletes). */
+    suspend fun repairLivingKinship() {
+        var changed = false
+        mutex.withLock {
+            database.withTransaction {
+                val people = peopleDao.all()
+                val fixes = TreeIntegrity.repairParentPointers(people)
+                fixes.forEach { peopleDao.upsert(it) }
+                if (fixes.isNotEmpty()) changed = true
+                val unions = unionDao.all()
+                val kept = TreeIntegrity.livingUnions(unions, people)
+                if (kept.size != unions.size) {
+                    unionDao.deleteAll()
+                    unionDao.upsertAll(kept)
+                    changed = true
+                }
+            }
+        }
+        if (changed) {
+            generation += 1
+            schedulePush()
         }
     }
 
@@ -272,9 +297,21 @@ class TreeRepository(
             PhotoStore.delete(context, removed.photoFile)
         }
         val now = System.currentTimeMillis()
+        val people = peopleDao.all()
+        people.filter { it.fatherId == removed.id || it.motherId == removed.id }.forEach { child ->
+            peopleDao.upsert(
+                child.copy(
+                    fatherId = child.fatherId?.takeIf { it != removed.id },
+                    motherId = child.motherId?.takeIf { it != removed.id },
+                    updatedAtMillis = now,
+                ),
+            )
+        }
         peopleDao.upsert(
             removed.copy(
                 vacant = true,
+                fatherId = null,
+                motherId = null,
                 lastName = "",
                 birthLastName = "",
                 firstName = "",
@@ -300,12 +337,14 @@ class TreeRepository(
                 anchorId = other,
             )
         }
-        if (vacancyLinks.isNotEmpty()) {
-            val kept = openLinksState.value.filter { link ->
-                link.ownerId != removed.id && link.anchorId != removed.id
-            }
-            writeOpenLinks(kept + vacancyLinks)
+        val bridgeLinks = linksAfterRemoval(removed, people, unionDao.all())
+        val kept = openLinksState.value.filter { link ->
+            link.ownerId != removed.id && link.anchorId != removed.id && removed.id !in link.childIds
         }
+        writeOpenLinks(kept + vacancyLinks + bridgeLinks)
+        val keptUnions = TreeIntegrity.livingUnions(unionDao.all(), peopleDao.all())
+        unionDao.deleteAll()
+        unionDao.upsertAll(keptUnions)
         generation += 1
     }
 

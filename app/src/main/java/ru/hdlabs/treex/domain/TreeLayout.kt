@@ -63,6 +63,7 @@ object TreeLayout {
     ): Map<String, Int> {
         if (people.isEmpty()) return emptyMap()
         val byId = people.associateBy { it.id }
+        val living = TreeIntegrity.livingIds(people)
         val generation = HashMap<String, Int>()
         val visiting = HashSet<String>()
 
@@ -71,7 +72,7 @@ object TreeLayout {
             if (!visiting.add(id)) return 0
             val person = byId[id]
             val parents = listOfNotNull(person?.fatherId, person?.motherId)
-                .filter { it in byId && it != id }
+                .filter { it in living && it in byId && it != id }
             val value = if (parents.isEmpty()) 0 else parents.maxOf { depth(it) } + 1
             visiting.remove(id)
             generation[id] = value
@@ -89,7 +90,7 @@ object TreeLayout {
             var changed = false
             people.forEach { person ->
                 val parentGenerations = listOfNotNull(person.fatherId, person.motherId)
-                    .filter { it in byId && it != person.id }
+                    .filter { it in living && it in byId && it != person.id }
                     .map { generation.getValue(it) }
                 if (parentGenerations.isNotEmpty()) {
                     val below = parentGenerations.max() + 1
@@ -171,12 +172,15 @@ object TreeLayout {
         homePersonId: String? = null,
     ): TreePlacement {
         if (people.isEmpty()) return TreePlacement(emptyList(), emptyList(), emptyList(), 0f, 0f)
+        val livingPeople = TreeIntegrity.livingPeople(people)
+        if (livingPeople.isEmpty()) return TreePlacement(emptyList(), emptyList(), emptyList(), 0f, 0f)
+        val livingUnions = TreeIntegrity.livingUnions(unions, people)
         val byId = people.associateBy { it.id }
-        val heights = people.associate { it.id to cardHeight(it) }
-        val generation = generationMap(people, unions, openLinks)
+        val heights = livingPeople.associate { it.id to cardHeight(it) }
+        val generation = generationMap(livingPeople, livingUnions, openLinks)
         val placed = SugiyamaFamilyLayout.place(
-            people = people,
-            unions = unions,
+            people = livingPeople,
+            unions = livingUnions,
             openLinks = openLinks,
             homePersonId = homePersonId?.takeIf { it in byId },
             cardW = CARD_W,
@@ -185,21 +189,15 @@ object TreeLayout {
             pad = PAD,
             heights = heights,
         )
-        val rowHeight = people.groupBy { generation[it.id] ?: 0 }.mapValues { (_, band) ->
+        val rowHeight = livingPeople.groupBy { generation[it.id] ?: 0 }.mapValues { (_, band) ->
             band.maxOf { heights[it.id] ?: CARD_H }
         }
         val cards = placed.map { node ->
             val gen = generation[node.id] ?: 0
             TreeCard(node.id, node.left, node.top, rowHeight[gen] ?: node.height)
         }
-        val childGroups = childGroupsOf(people, cards, openLinks)
-        val spouseLinks = unions.mapNotNull { union ->
-            if (union.partnerAId in byId && union.partnerBId in byId && union.partnerAId != union.partnerBId) {
-                union.partnerAId to union.partnerBId
-            } else {
-                null
-            }
-        }.distinct()
+        val childGroups = childGroupsOf(livingPeople, cards, openLinks, byId)
+        val spouseLinks = livingUnions.map { it.partnerAId to it.partnerBId }.distinct()
         val width = (cards.maxOfOrNull { it.left + CARD_W } ?: PAD) + PAD
         val height = (cards.maxOfOrNull { it.top + it.height } ?: PAD) + PAD
         val knots = openLinks.mapNotNull { link -> knotFor(link, cards) }
@@ -210,11 +208,12 @@ object TreeLayout {
         people: List<PersonEntity>,
         cards: List<TreeCard>,
         openLinks: List<OpenLink>,
+        byId: Map<String, PersonEntity>,
     ): List<ChildGroup> {
         val placed = cards.map { it.id }.toSet()
         val groups = mutableListOf<ChildGroup>()
         people.filter { it.id in placed }.groupBy { person ->
-            listOfNotNull(person.fatherId, person.motherId).filter { it in placed }.sorted()
+            TreeIntegrity.livingParentIds(person, placed, byId).sorted()
         }.forEach { (parents, children) ->
             if (parents.isNotEmpty()) {
                 groups += ChildGroup(parents, children.map { it.id })

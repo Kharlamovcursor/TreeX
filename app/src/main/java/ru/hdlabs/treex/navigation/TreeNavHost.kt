@@ -124,7 +124,10 @@ fun TreeNavHost() {
             }
         }
         launch {
-            runCatching { app.container.treeRepository.reconcileParentUnions() }
+            runCatching {
+                app.container.treeRepository.repairLivingKinship()
+                app.container.treeRepository.reconcileParentUnions()
+            }
         }
         launch {
             val git = runCatching { app.container.treeRepository.syncTreeFromGitIfNeeded() }
