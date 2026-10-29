@@ -1,6 +1,7 @@
 package ru.hdlabs.treex.data
 
 import android.content.Context
+import kotlin.DeprecationLevel
 import androidx.room.withTransaction
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -70,6 +71,8 @@ import ru.hdlabs.treex.BuildConfig
 import ru.hdlabs.treex.diagnostic.AppEventLog
 import ru.hdlabs.treex.diagnostic.TreeSnapshotRenderer
 import ru.hdlabs.treex.data.PhotoStore
+import ru.hdlabs.treex.data.kinship.KinshipRepository
+import ru.hdlabs.treex.data.kinship.KinshipWriteResult
 import ru.hdlabs.treex.util.NetworkHelper
 import ru.hdlabs.treex.sync.GitRelation
 import ru.hdlabs.treex.sync.inspectGitRefresh
@@ -81,6 +84,8 @@ import java.time.ZoneId
 data class TreeState(
     val people: List<PersonEntity> = emptyList(),
     val unions: List<UnionEntity> = emptyList(),
+    val families: List<ru.hdlabs.treex.data.local.FamilyEntity> = emptyList(),
+    val familyChildren: List<ru.hdlabs.treex.data.local.FamilyChildEntity> = emptyList(),
 )
 
 data class SnapshotInfo(
@@ -124,9 +129,24 @@ class TreeRepository(
     private val linkJson = Json { ignoreUnknownKeys = true; encodeDefaults = true }
     private val openLinksState = MutableStateFlow(loadOpenLinks())
     val openLinks: StateFlow<List<OpenLink>> = openLinksState
+    private var kinshipRepository: KinshipRepository? = null
 
-    fun observe(): Flow<TreeState> = combine(peopleDao.observeAll(), unionDao.observeAll()) { people, unions ->
-        TreeState(people, unions)
+    fun bindKinshipRepository(repository: KinshipRepository) {
+        kinshipRepository = repository
+    }
+
+    suspend fun notifyKinshipChanged() {
+        mutex.withLock { generation += 1 }
+        schedulePush()
+    }
+
+    fun observe(): Flow<TreeState> = combine(
+        peopleDao.observeAll(),
+        unionDao.observeAll(),
+        familyDao.observeAll(),
+        familyChildDao.observeAll(),
+    ) { people, unions, families, familyChildren ->
+        TreeState(people, unions, families, familyChildren)
     }
 
     suspend fun person(id: String): PersonEntity? = peopleDao.get(id)
@@ -214,12 +234,28 @@ class TreeRepository(
         )
     }
 
-    suspend fun detachSpouse(personId: String, spouseId: String) = applyKinshipMutation { state ->
-        FamilyTreeMutations.removeSpousePartnership(state, personId, spouseId)
+    suspend fun detachSpouse(personId: String, spouseId: String) {
+        val kinship = kinshipRepository ?: error("KinshipRepository not bound")
+        mutex.withLock {
+            snapshotLocked(readLocked())
+            when (val result = kinship.detachSpouse(personId, spouseId)) {
+                is KinshipWriteResult.Success -> Unit
+                is KinshipWriteResult.BlockedReason -> error(result.code.name)
+                is KinshipWriteResult.Blocked -> error("Не удалось убрать связь")
+            }
+        }
     }
 
-    suspend fun detachParentChild(childId: String, parentId: String) = applyKinshipMutation { state ->
-        FamilyTreeMutations.removeParentChildEdge(state, childId, parentId)
+    suspend fun detachParentChild(childId: String, parentId: String) {
+        val kinship = kinshipRepository ?: error("KinshipRepository not bound")
+        mutex.withLock {
+            snapshotLocked(readLocked())
+            when (val result = kinship.detachParent(childId, parentId)) {
+                is KinshipWriteResult.Success -> Unit
+                is KinshipWriteResult.BlockedReason -> error(result.code.name)
+                is KinshipWriteResult.Blocked -> error("Не удалось убрать связь")
+            }
+        }
     }
 
     /** Объединение дубликатов только по явному вызову (keep остаётся, remove удаляется). */
@@ -303,6 +339,10 @@ class TreeRepository(
         return changed
     }
 
+    @Deprecated(
+        message = "Use KinshipRepository from PersonScreens",
+        level = DeprecationLevel.WARNING,
+    )
     suspend fun savePerson(
         person: PersonEntity,
         spouses: List<SpouseDraft>,
@@ -436,19 +476,27 @@ class TreeRepository(
     }
 
     suspend fun deletePerson(id: String) {
-        mutex.withLock {
-            database.withTransaction {
+        val kinship = kinshipRepository ?: error("KinshipRepository not bound")
+        withContext(NonCancellable) {
+            mutex.withLock {
                 snapshotLocked(readLocked())
                 val people = peopleDao.all()
-                val removed = people.find { it.id == id } ?: return@withTransaction
-                purgePersonLocked(removed, people)
-                val remaining = peopleDao.all()
-                unionDao.deleteAll()
-                unionDao.upsertAll(UnionEr.compactUnions(remaining, unionDao.all()))
-                syncLegacyParentFieldsLocked()
+                val removed = people.find { it.id == id } ?: return@withLock
+                val fresh = linksAfterRemoval(removed, people, unionDao.all())
+                when (val result = kinship.removePerson(id)) {
+                    is KinshipWriteResult.Success -> {
+                        val photo = removed.photoFile
+                        if (photo.isNotBlank()) PhotoStore.delete(context, photo)
+                        val kept = openLinksState.value.filter { link ->
+                            link.ownerId != removed.id && link.anchorId != removed.id && removed.id !in link.childIds
+                        }
+                        writeOpenLinks(kept + fresh)
+                    }
+                    is KinshipWriteResult.BlockedReason -> error(result.code.name)
+                    is KinshipWriteResult.Blocked -> error("Не удалось удалить карточку")
+                }
             }
         }
-        schedulePush()
     }
 
     private suspend fun vacatePersonLocked(removed: PersonEntity) {

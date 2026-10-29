@@ -1,5 +1,6 @@
 package ru.hdlabs.treex.domain
 
+import kotlin.DeprecationLevel
 import ru.hdlabs.treex.data.local.PersonEntity
 import ru.hdlabs.treex.data.local.UnionEntity
 
@@ -9,6 +10,7 @@ fun suggestedParentFamilyName(host: PersonEntity): String = when (host.gender) {
     else -> host.lastName.trim()
 }
 
+@Deprecated("Use families graph", level = DeprecationLevel.WARNING)
 fun parentCouplePairs(people: List<PersonEntity>): List<Pair<String, String>> =
     people.mapNotNull { person ->
         val fatherId = person.fatherId ?: return@mapNotNull null

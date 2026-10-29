@@ -56,6 +56,11 @@ import kotlinx.coroutines.withContext
 import ru.hdlabs.treex.TreeXApplication
 import ru.hdlabs.treex.data.PhotoStore
 import ru.hdlabs.treex.data.TreeState
+import ru.hdlabs.treex.data.fatherIdOf
+import ru.hdlabs.treex.data.genealogyGraph
+import ru.hdlabs.treex.data.kinship.persistPersonEditor
+import ru.hdlabs.treex.data.motherIdOf
+import ru.hdlabs.treex.data.spousePersonIds
 import ru.hdlabs.treex.data.local.PersonEntity
 import ru.hdlabs.treex.domain.acceptsAsParent
 import ru.hdlabs.treex.domain.acceptsAsSpouse
@@ -67,10 +72,8 @@ import ru.hdlabs.treex.domain.fullName
 import ru.hdlabs.treex.domain.isVacantSlot
 import ru.hdlabs.treex.domain.lifeLine
 import ru.hdlabs.treex.domain.parseSpouseDrafts
-import ru.hdlabs.treex.domain.spouseDraftsOf
-import ru.hdlabs.treex.domain.spouseIdsOf
 import ru.hdlabs.treex.domain.halfSiblingCaption
-import ru.hdlabs.treex.domain.siblingGroupsOf
+import ru.hdlabs.treex.domain.SiblingGroups
 import ru.hdlabs.treex.domain.spouseNoun
 import ru.hdlabs.treex.domain.suggestPatronymic
 import ru.hdlabs.treex.domain.suggestedParentFamilyName
@@ -93,6 +96,8 @@ fun PersonEditorScreen(routeId: String, role: String, anchor: String, nav: NavHo
     val context = LocalContext.current
     val app = context.applicationContext as TreeXApplication
     val repo = app.container.treeRepository
+    val kinship = app.container.kinshipRepository
+    val settings = app.container.settingsRepository
     val creating = routeId == "new"
     val personId = rememberSaveable(routeId) { if (creating) UUID.randomUUID().toString() else routeId }
     val tree by repo.observe().collectAsStateWithLifecycle(TreeState())
@@ -115,6 +120,10 @@ fun PersonEditorScreen(routeId: String, role: String, anchor: String, nav: NavHo
     var createdAt by rememberSaveable(personId) { mutableLongStateOf(System.currentTimeMillis()) }
     var status by rememberSaveable(personId) { mutableStateOf("Карточка сохранится сама через пару секунд после ввода") }
     var shaped by rememberSaveable(personId) { mutableStateOf(false) }
+    var baselineSpouseIds by rememberSaveable(personId) { mutableStateOf(listOf<String>()) }
+    var baselineFatherId by rememberSaveable(personId) { mutableStateOf("") }
+    var baselineMotherId by rememberSaveable(personId) { mutableStateOf("") }
+    var loadedPrevious by remember(personId) { mutableStateOf<PersonEntity?>(null) }
     var middleTouched by rememberSaveable(personId) { mutableStateOf(false) }
     var picker by remember { mutableStateOf<Picker?>(null) }
     var appeared by remember { mutableStateOf(false) }
@@ -161,13 +170,21 @@ fun PersonEditorScreen(routeId: String, role: String, anchor: String, nav: NavHo
             while (true) {
                 if (!buffer.ready || !buffer.hasName || buffer.touched.isEmpty()) return@withLock
                 val epoch = buffer.epoch
-                repo.savePerson(
-                    buffer.person,
-                    buffer.spouses,
-                    snapshot = snapshot,
+                persistPersonEditor(
+                    kinship = kinship,
+                    treeRepository = repo,
+                    settingsRepository = settings,
+                    creating = creating,
+                    draft = buffer.person,
+                    spouses = buffer.spouses,
                     attach = buffer.attach,
                     preserveUntouched = true,
                     touched = buffer.touched,
+                    previous = loadedPrevious,
+                    baselineSpouseIds = baselineSpouseIds,
+                    baselineFatherId = baselineFatherId.ifBlank { null },
+                    baselineMotherId = baselineMotherId.ifBlank { null },
+                    snapshot = snapshot,
                 )
                 if (buffer.epoch == epoch) return@withLock
             }
@@ -184,6 +201,8 @@ fun PersonEditorScreen(routeId: String, role: String, anchor: String, nav: NavHo
                 status = "Карточка не найдена"
                 return@LaunchedEffect
             }
+            val graph = current.genealogyGraph()
+            loadedPrevious = person
             lastName = person.lastName
             birthLastName = person.birthLastName
             firstName = person.firstName
@@ -196,9 +215,12 @@ fun PersonEditorScreen(routeId: String, role: String, anchor: String, nav: NavHo
             phone = person.phone
             photoFile = person.photoFile
             notes = person.notes
-            fatherId = person.fatherId.orEmpty()
-            motherId = person.motherId.orEmpty()
-            spouseRaw = formatSpouseDrafts(spouseDraftsOf(current.unions, person.id))
+            fatherId = graph.fatherIdOf(person.id).orEmpty()
+            motherId = graph.motherIdOf(person.id).orEmpty()
+            baselineFatherId = fatherId
+            baselineMotherId = motherId
+            baselineSpouseIds = graph.spousePersonIds(person.id)
+            spouseRaw = formatSpouseDrafts(baselineSpouseIds.map { SpouseDraft(it) })
             createdAt = person.createdAtMillis
             ready = true
         }
@@ -207,7 +229,7 @@ fun PersonEditorScreen(routeId: String, role: String, anchor: String, nav: NavHo
         if (!creating || shaped || anchor.isBlank()) return@LaunchedEffect
         val current = repo.observe().first()
         val host = current.people.find { it.id == anchor } ?: return@LaunchedEffect
-        val hostSpouses = spouseIdsOf(current.unions, host.id)
+        val hostGraph = current.genealogyGraph()
         when (role) {
             "father" -> {
                 if (lastName.isBlank()) {
@@ -249,13 +271,13 @@ fun PersonEditorScreen(routeId: String, role: String, anchor: String, nav: NavHo
                     buffer.mark("gender")
                 }
                 if (fatherId.isBlank()) {
-                    host.fatherId?.let {
+                    hostGraph.fatherIdOf(host.id)?.let {
                         fatherId = it
                         buffer.mark("father")
                     }
                 }
                 if (motherId.isBlank()) {
-                    host.motherId?.let {
+                    hostGraph.motherIdOf(host.id)?.let {
                         motherId = it
                         buffer.mark("mother")
                     }
@@ -576,20 +598,15 @@ fun PersonDetailScreen(personId: String, nav: NavHostController) {
     var deleteImpact by remember { mutableStateOf<ru.hdlabs.treex.domain.DeletePersonImpact?>(null) }
     var mergeCandidate by remember { mutableStateOf<PersonEntity?>(null) }
     var mergeConfirm by remember { mutableStateOf(false) }
-    val livingIds = remember(tree.people) { tree.people.filter { !it.vacant }.map { it.id }.toSet() }
-    val unionsCompact = remember(tree.people, tree.unions) {
-        ru.hdlabs.treex.domain.UnionEr.compactUnions(tree.people, tree.unions)
-    }
+    val graph = remember(tree.people, tree.families, tree.familyChildren) { tree.genealogyGraph() }
     if (person == null) {
         HdScaffold(title = "Карточка", onBack = { nav.popBackStack() }) {
             Text("Этой карточки уже нет", color = HdTextSecondary)
         }
         return
     }
-    val spouses = spouseIdsOf(tree.unions, person.id).mapNotNull { id -> tree.people.find { it.id == id } }
-    val children = tree.people.filter { child ->
-        person.id in ru.hdlabs.treex.domain.UnionEr.parentIdsOf(child, livingIds, unionsCompact)
-    }
+    val spouses = graph.spousesOf(person.id).mapNotNull { p -> tree.people.find { it.id == p.id } }
+    val children = graph.childrenOf(person.id).mapNotNull { p -> tree.people.find { it.id == p.id } }
     val duplicateCandidates = tree.people.filter { other ->
         other.id != person.id && !other.vacant &&
             other.lastName.equals(person.lastName, true) &&
@@ -597,7 +614,10 @@ fun PersonDetailScreen(personId: String, nav: NavHostController) {
             other.middleName.equals(person.middleName, true) &&
             person.lastName.isNotBlank() && person.firstName.isNotBlank()
     }
-    val siblings = siblingGroupsOf(person, tree.people)
+    val siblings = SiblingGroups(
+        full = graph.siblingsOf(person.id).mapNotNull { p -> tree.people.find { it.id == p.id } },
+        half = emptyList(),
+    )
     if (person.isVacantSlot()) {
         HdScaffold(title = "Пустое место", onBack = { nav.popBackStack() }) {
             Text("Здесь была карточка. Древо и связи сохранены.", color = HdTextSecondary)
@@ -649,13 +669,13 @@ fun PersonDetailScreen(personId: String, nav: NavHostController) {
         HdCard {
             Text("Родственные связи", color = HdTextPrimary, fontWeight = FontWeight.SemiBold)
             Text("«Убрать связь» удаляет только эту линию; человек остаётся в древе.", color = HdTextSecondary, modifier = Modifier.padding(bottom = 6.dp))
-            LinkLine("Отец", tree.people.find { it.id == person.fatherId }, nav) {
-                person.fatherId?.let { fid ->
+            LinkLine("Отец", graph.fatherIdOf(person.id)?.let { id -> tree.people.find { it.id == id } }, nav) {
+                graph.fatherIdOf(person.id)?.let { fid ->
                     scope.launch { repo.detachParentChild(person.id, fid) }
                 }
             }
-            LinkLine("Мать", tree.people.find { it.id == person.motherId }, nav) {
-                person.motherId?.let { mid ->
+            LinkLine("Мать", graph.motherIdOf(person.id)?.let { id -> tree.people.find { it.id == id } }, nav) {
+                graph.motherIdOf(person.id)?.let { mid ->
                     scope.launch { repo.detachParentChild(person.id, mid) }
                 }
             }
@@ -663,10 +683,7 @@ fun PersonDetailScreen(personId: String, nav: NavHostController) {
                 Text("Супруг не указан", color = HdTextSecondary)
             } else {
                 spouses.forEach { spouse ->
-                    val married = tree.unions.find {
-                        setOf(it.partnerAId, it.partnerBId) == setOf(person.id, spouse.id)
-                    }?.marriedOn.orEmpty()
-                    LinkLine(spouseNoun(person.gender), spouse, nav, if (married.isBlank()) "" else ", брак $married") {
+                    LinkLine(spouseNoun(person.gender), spouse, nav) {
                         scope.launch { repo.detachSpouse(person.id, spouse.id) }
                     }
                 }
@@ -700,11 +717,11 @@ fun PersonDetailScreen(personId: String, nav: NavHostController) {
             }
         }
         Spacer(Modifier.height(12.dp))
-        if (person.fatherId == null) {
+        if (graph.fatherIdOf(person.id) == null) {
             HdSecondaryButton("Добавить отца") { nav.navigate(Routes.edit("new", "father", person.id)) }
             Spacer(Modifier.height(8.dp))
         }
-        if (person.motherId == null) {
+        if (graph.motherIdOf(person.id) == null) {
             HdSecondaryButton("Добавить мать") { nav.navigate(Routes.edit("new", "mother", person.id)) }
             Spacer(Modifier.height(8.dp))
         }

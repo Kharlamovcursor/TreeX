@@ -1,5 +1,6 @@
 package ru.hdlabs.treex.domain
 
+import kotlin.DeprecationLevel
 import ru.hdlabs.treex.data.local.PersonEntity
 import ru.hdlabs.treex.data.local.UnionEntity
 
@@ -83,6 +84,7 @@ object UnionEr {
      * Сжимает союзы: один союз на пару родителей с детьми, без дублирующих pu-* при двух родителях,
      * отдельные брачные союзы без детей.
      */
+    @Deprecated("Use GenealogyGraph / families", level = DeprecationLevel.WARNING)
     fun compactUnions(people: List<PersonEntity>, existing: List<UnionEntity>): List<UnionEntity> {
         val ids = people.map { it.id }.toSet()
         val living = people.filter { !it.vacant }
@@ -160,6 +162,7 @@ object UnionEr {
     }
 
     /** @see compactUnions */
+    @Deprecated("Use KinshipRepository", level = DeprecationLevel.WARNING)
     fun reconcileChildMembership(
         people: List<PersonEntity>,
         unions: List<UnionEntity>,

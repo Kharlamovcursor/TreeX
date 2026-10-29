@@ -4,9 +4,13 @@ import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
+import kotlinx.coroutines.flow.Flow
 
 @Dao
 interface FamilyChildDao {
+    @Query("SELECT * FROM family_children ORDER BY familyId, position")
+    fun observeAll(): Flow<List<FamilyChildEntity>>
+
     @Query("SELECT * FROM family_children ORDER BY familyId, position")
     suspend fun all(): List<FamilyChildEntity>
 

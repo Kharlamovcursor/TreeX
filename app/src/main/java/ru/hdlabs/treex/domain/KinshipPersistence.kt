@@ -1,5 +1,6 @@
 package ru.hdlabs.treex.domain
 
+import kotlin.DeprecationLevel
 import ru.hdlabs.treex.data.local.PersonEntity
 import ru.hdlabs.treex.data.local.UnionEntity
 
@@ -8,6 +9,7 @@ import ru.hdlabs.treex.data.local.UnionEntity
  * Координаты дерева не затрагиваются.
  */
 object KinshipPersistence {
+    @Deprecated("Use KinshipRepository", level = DeprecationLevel.WARNING)
     fun rebuildUnions(
         people: List<PersonEntity>,
         existingUnions: List<UnionEntity>,
