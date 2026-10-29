@@ -1,7 +1,6 @@
 package ru.hdlabs.treex.ui.tree
 
 import android.content.Context
-import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -30,14 +29,14 @@ class TreeViewModel(
         viewModelScope.launch { loadInternal(preserveTransform = false) }
     }
 
-    private suspend fun loadInternal(preserveTransform: Boolean) {
-        val prevTransform = (_state.value as? TreeUiState.Ready)?.transform
-        if (!preserveTransform) {
-            _state.value = TreeUiState.Loading
     /** Writes current [state] to app-private storage (debug builds). */
     fun dumpDiagnostics(context: Context): File =
         TreeDiagnosticsDump.dumpDiagnostics(context, _state.value)
 
+    private suspend fun loadInternal(preserveTransform: Boolean) {
+        val prevTransform = (_state.value as? TreeUiState.Ready)?.transform
+        if (!preserveTransform) {
+            _state.value = TreeUiState.Loading
         }
         try {
             val ready = TreeReadyBuilder.build(treeRepository.buildGraphSnapshot())
@@ -75,21 +74,44 @@ class TreeViewModel(
         updateReady { it.copy(sheet = null) }
     }
 
-    fun onTransform(scale: Float, offsetX: Float, offsetY: Float, viewW: Float, viewH: Float) {
+    fun onTransform(
+        scale: Float,
+        offsetX: Float,
+        offsetY: Float,
+        viewW: Float,
+        viewH: Float,
+        paddingPx: Float = 48f,
+    ) {
         updateReady { ready ->
             val t = Gestures.clampTransform(
                 CanvasTransform(scale, offsetX, offsetY),
                 ready.layout.bounds,
                 viewW,
                 viewH,
+                paddingPx,
             )
             ready.copy(transform = t)
         }
     }
 
-    fun fitToScreen(viewW: Float, viewH: Float) {
+    /** Keeps pan/zoom valid after rotation or window inset change (transform scale preserved). */
+    fun clampTransformToViewport(viewW: Float, viewH: Float, paddingPx: Float) {
         updateReady { ready ->
-            ready.copy(transform = Gestures.fitToScreen(ready.layout.bounds, viewW, viewH))
+            ready.copy(
+                transform = Gestures.clampTransform(
+                    ready.transform,
+                    ready.layout.bounds,
+                    viewW,
+                    viewH,
+                    paddingPx,
+                ),
+            )
+        }
+    }
+
+    fun fitToScreen(viewW: Float, viewH: Float, paddingPx: Float = 48f) {
+        updateReady { ready ->
+            ready.copy(transform = Gestures.fitToScreen(ready.layout.bounds, viewW, viewH, paddingPx))
         }
     }
 

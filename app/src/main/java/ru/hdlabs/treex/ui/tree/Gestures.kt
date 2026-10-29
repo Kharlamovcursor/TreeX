@@ -35,14 +35,29 @@ object Gestures {
         )
     }
 
-    fun fitToScreen(contentBounds: Bounds, viewWidth: Float, viewHeight: Float): CanvasTransform {
+    fun fitToScreen(
+        contentBounds: Bounds,
+        viewWidth: Float,
+        viewHeight: Float,
+        paddingPx: Float = 48f,
+    ): CanvasTransform {
         if (viewWidth <= 1f || viewHeight <= 1f) return CanvasTransform()
+        val innerW = (viewWidth - paddingPx * 2f).coerceAtLeast(1f)
+        val innerH = (viewHeight - paddingPx * 2f).coerceAtLeast(1f)
         val w = contentBounds.maxX - contentBounds.minX
         val h = contentBounds.maxY - contentBounds.minY
         if (w <= 1f || h <= 1f) return CanvasTransform()
-        val scale = minOf(viewWidth / w, viewHeight / h, MAX_SCALE).coerceAtLeast(MIN_SCALE)
-        val offsetX = (viewWidth - w * scale) / 2f - contentBounds.minX * scale
-        val offsetY = (viewHeight - h * scale) / 2f - contentBounds.minY * scale
-        return CanvasTransform(scale, offsetX, offsetY)
+        val centerX = (contentBounds.minX + contentBounds.maxX) / 2f
+        val centerY = (contentBounds.minY + contentBounds.maxY) / 2f
+        val scale = minOf(innerW / w, innerH / h, MAX_SCALE).coerceAtLeast(MIN_SCALE)
+        val offsetX = viewWidth / 2f - centerX * scale
+        val offsetY = viewHeight / 2f - centerY * scale
+        return clampTransform(
+            CanvasTransform(scale, offsetX, offsetY),
+            contentBounds,
+            viewWidth,
+            viewHeight,
+            margin = paddingPx,
+        )
     }
 }

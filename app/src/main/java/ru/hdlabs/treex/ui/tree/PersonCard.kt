@@ -20,11 +20,9 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import ru.hdlabs.treex.domain.graph.Gender
 import ru.hdlabs.treex.domain.graph.Person
 import ru.hdlabs.treex.domain.layout.LayoutConfig
 import ru.hdlabs.treex.ui.theme.HdBlue
-import ru.hdlabs.treex.ui.theme.HdOrange
 import ru.hdlabs.treex.ui.theme.HdPanelElevated
 import ru.hdlabs.treex.ui.theme.HdTextPrimary
 import ru.hdlabs.treex.ui.theme.HdTextSecondary
@@ -37,8 +35,7 @@ fun PersonCard(
     onClick: () -> Unit,
 ) {
     Card(
-        modifier = modifier
-            .clickable(onClick = onClick),
+        modifier = modifier.clickable(onClick = onClick),
         shape = RoundedCornerShape(12.dp),
         colors = CardDefaults.cardColors(containerColor = HdPanelElevated.copy(alpha = 0.95f)),
         border = BorderStroke(if (selected) 2.dp else 1.dp, if (selected) HdBlue else HdBlue.copy(alpha = 0.35f)),

@@ -1,12 +1,17 @@
 package ru.hdlabs.treex.ui.tree
 
+import android.util.Log
+import android.widget.Toast
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
-import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -15,9 +20,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
-import android.util.Log
-import android.widget.Toast
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavHostController
@@ -51,6 +55,22 @@ fun TreeScreen(nav: NavHostController, highlight: String = "") {
         titleContent = { HdLabsBrandTitle() },
         scroll = false,
         actions = {
+            IconButton(onClick = { nav.navigate(Routes.SETTINGS) }) {
+                Icon(Icons.Default.Settings, contentDescription = "Настройки", tint = HdOrange)
+            }
+            if (BuildConfig.DEBUG) {
+                TextButton(
+                    onClick = {
+                        val file = viewModel.dumpDiagnostics(context)
+                        val path = file.absolutePath
+                        Log.i("TreeDiagnostics", "dump written: $path")
+                        Toast.makeText(context, "Диагностика: ${file.name}", Toast.LENGTH_LONG).show()
+                        DiagnosticShare.share(context, file)
+                    },
+                ) {
+                    Text("Dump diagnostics", color = HdOrange)
+                }
+            }
             TextButton(onClick = { viewModel.reload() }) {
                 Text("Обновить", color = HdOrange)
             }
@@ -61,7 +81,7 @@ fun TreeScreen(nav: NavHostController, highlight: String = "") {
                 Modifier.fillMaxSize(),
                 contentAlignment = Alignment.Center,
             ) {
-                    Text("Dump diagnostics", color = HdOrange)
+                CircularProgressIndicator()
             }
             is TreeUiState.Error -> Column(
                 Modifier.fillMaxSize().padding(16.dp),
@@ -81,6 +101,10 @@ fun TreeScreen(nav: NavHostController, highlight: String = "") {
                     val density = LocalDensity.current
                     val viewW = with(density) { maxWidth.toPx() }
                     val viewH = with(density) { maxHeight.toPx() }
+                    val fitPaddingPx = with(density) { 40.dp.toPx() }
+                    LaunchedEffect(viewW, viewH, fitPaddingPx) {
+                        viewModel.clampTransformToViewport(viewW, viewH, fitPaddingPx)
+                    }
                     Box(Modifier.fillMaxSize()) {
                         if (state.error != null) {
                             Text(
@@ -96,10 +120,13 @@ fun TreeScreen(nav: NavHostController, highlight: String = "") {
                             modifier = Modifier.fillMaxSize(),
                             onPersonClick = viewModel::onPersonClick,
                             onSlotClick = viewModel::onSlotClick,
-                            onTransform = viewModel::onTransform,
+                            onTransform = { scale, ox, oy, w, h ->
+                                viewModel.onTransform(scale, ox, oy, w, h, fitPaddingPx)
+                            },
+                            paddingPx = fitPaddingPx,
                         )
                         TextButton(
-                            onClick = { viewModel.fitToScreen(viewW, viewH) },
+                            onClick = { viewModel.fitToScreen(viewW, viewH, fitPaddingPx) },
                             modifier = Modifier.align(Alignment.TopEnd),
                         ) {
                             Text("Всё древо", color = HdOrange)
