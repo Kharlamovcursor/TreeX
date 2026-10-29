@@ -19,6 +19,8 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
@@ -58,17 +60,16 @@ fun TreeScreen(nav: NavHostController, highlight: String = "") {
             IconButton(onClick = { nav.navigate(Routes.SETTINGS) }) {
                 Icon(Icons.Default.Settings, contentDescription = "Настройки", tint = HdOrange)
             }
-            if (BuildConfig.DEBUG) {
+            if (BuildConfig.DEBUG || TreeReleaseDebug.ENABLED) {
                 TextButton(
                     onClick = {
                         val file = viewModel.dumpDiagnostics(context)
-                        val path = file.absolutePath
-                        Log.i("TreeDiagnostics", "dump written: $path")
+                        Log.i("TreeDiagnostics", "dump written: ${file.absolutePath}")
                         Toast.makeText(context, "Диагностика: ${file.name}", Toast.LENGTH_LONG).show()
                         DiagnosticShare.share(context, file)
                     },
                 ) {
-                    Text("Dump diagnostics", color = HdOrange)
+                    Text("Dump", color = HdOrange)
                 }
             }
             TextButton(onClick = { viewModel.reload() }) {
@@ -136,6 +137,16 @@ fun TreeScreen(nav: NavHostController, highlight: String = "") {
                             onClick = { nav.navigate(Routes.edit("new")) },
                             modifier = Modifier.align(Alignment.BottomEnd).padding(12.dp),
                         )
+                        if (TreeReleaseDebug.ENABLED) {
+                            Text(
+                                text = "v${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})",
+                                color = Color.Red,
+                                fontSize = 12.sp,
+                                modifier = Modifier
+                                    .align(Alignment.BottomEnd)
+                                    .padding(end = 12.dp, bottom = 72.dp),
+                            )
+                        }
                     }
                 }
                 state.sheet?.let { sheet ->

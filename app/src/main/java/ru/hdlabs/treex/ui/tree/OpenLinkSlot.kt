@@ -1,7 +1,6 @@
 package ru.hdlabs.treex.ui.tree
 
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -21,10 +20,9 @@ import ru.hdlabs.treex.ui.theme.HdTextSecondary
 fun OpenLinkSlot(
     slot: OpenLinkSlotState,
     modifier: Modifier = Modifier,
-    onClick: () -> Unit,
 ) {
     Card(
-        modifier = modifier.clickable(onClick = onClick),
+        modifier = modifier,
         shape = RoundedCornerShape(12.dp),
         colors = CardDefaults.cardColors(containerColor = HdPanelElevated.copy(alpha = 0.6f)),
         border = BorderStroke(1.dp, HdOrange.copy(alpha = 0.8f)),

@@ -33,7 +33,6 @@ fun TreeCanvas(
     val density = LocalDensity.current
     val nodeMap = remember(state.layout) { state.layout.nodes.associateBy { it.personId } }
     val blockMap = remember(state.layout) { state.layout.familyBlocks.associateBy { it.familyId } }
-
     BoxWithConstraints(modifier.fillMaxSize()) {
         val viewW = with(density) { maxWidth.toPx() }
         val viewH = with(density) { maxHeight.toPx() }
@@ -46,6 +45,15 @@ fun TreeCanvas(
             onTransformCommitted = { t ->
                 onTransform(t.scale, t.offsetX, t.offsetY, viewW, viewH)
             },
+            onViewportTap = { viewportPoint, transform ->
+                TreeLayoutHitTest.hitOpenLinkSlot(viewportPoint, transform, state.openLinks)?.let {
+                    onSlotClick(it)
+                    return@TreeTransformLayer
+                }
+                TreeLayoutHitTest.hitPersonId(viewportPoint, transform, state.layout.nodes)?.let {
+                    onPersonClick(it)
+                }
+            },
             modifier = Modifier.fillMaxSize(),
         ) {
             TreeLayoutContent(
@@ -53,8 +61,6 @@ fun TreeCanvas(
                 nodeMap = nodeMap,
                 blockMap = blockMap,
                 density = density,
-                onPersonClick = onPersonClick,
-                onSlotClick = onSlotClick,
             )
         }
     }
@@ -66,8 +72,6 @@ private fun TreeLayoutContent(
     nodeMap: Map<String, ru.hdlabs.treex.domain.layout.LayoutNode>,
     blockMap: Map<String, ru.hdlabs.treex.domain.layout.FamilyBlock>,
     density: androidx.compose.ui.unit.Density,
-    onPersonClick: (String) -> Unit,
-    onSlotClick: (OpenLinkSlotState) -> Unit,
 ) {
     Canvas(Modifier.fillMaxSize()) {
         state.layout.familyBlocks.forEach { block ->
@@ -111,7 +115,6 @@ private fun TreeLayoutContent(
                     with(density) { node.width.toDp() },
                     with(density) { node.height.toDp() },
                 ),
-            onClick = { onPersonClick(node.personId) },
         )
     }
     state.openLinks.forEach { slot ->
@@ -123,7 +126,6 @@ private fun TreeLayoutContent(
                     with(density) { slot.width.toDp() },
                     with(density) { slot.height.toDp() },
                 ),
-            onClick = { onSlotClick(slot) },
         )
     }
 }

@@ -1,7 +1,6 @@
 package ru.hdlabs.treex.ui.tree
 
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
@@ -32,10 +31,9 @@ fun PersonCard(
     person: Person,
     selected: Boolean,
     modifier: Modifier = Modifier,
-    onClick: () -> Unit,
 ) {
     Card(
-        modifier = modifier.clickable(onClick = onClick),
+        modifier = modifier,
         shape = RoundedCornerShape(12.dp),
         colors = CardDefaults.cardColors(containerColor = HdPanelElevated.copy(alpha = 0.95f)),
         border = BorderStroke(if (selected) 2.dp else 1.dp, if (selected) HdBlue else HdBlue.copy(alpha = 0.35f)),
