@@ -26,14 +26,17 @@ data class TreePlacement(
 )
 
 /**
- * Layout facade: reads kinship from [PersonEntity]/[UnionEntity], assigns Y via [generationMap],
- * X via [SugiyamaFamilyLayout] (full recompute each time). Rendering uses [TreePlacement] only.
+ * Layout facade: one horizontal row per generation ([generationMap] + shared top),
+ * X via [SugiyamaFamilyLayout] with [CARD_GAP] spacing. Child lines use union hubs ([TreeLinkGeometry]).
  */
 object TreeLayout {
     const val CARD_W = 168f
     const val CARD_H = 108f
+    /** Horizontal gap between cards in a generation row (CSS `card-gap` equivalent). */
+    const val CARD_GAP = 44f
+    /** Gap between husband and wife in one marriage block. */
+    const val SPOUSE_GAP = 28f
     private const val MAX_CARD_H = 124f
-    private const val SPOUSE_GAP = 28f
     private const val ROW_GAP = 76f
     private const val PAD = 16f
 
@@ -220,7 +223,7 @@ object TreeLayout {
                 a to b
             },
         )
-        val childGroups = UnionEr.childGroupsByParentPairs(livingPeople, placedIds, livingUnions) +
+        val childGroups = childGroupsFromUnions(livingUnions, placedIds) +
             childGroupsFromOpenLinks(livingPeople, cards, openLinks, byId, reconciledUnions)
         val spouseLinks = livingUnions.filter { it.hasBothPartners() }.mapNotNull { u ->
             val a = u.partnerAId ?: return@mapNotNull null
@@ -233,6 +236,18 @@ object TreeLayout {
         val knots = openLinks.mapNotNull { link -> knotFor(link, cards) }
         return TreePlacement(cards, spouseLinks, childGroups, width, height, knots)
     }
+
+    /** One union → one union hub → its children (supports remarriage without duplicating parent cards). */
+    private fun childGroupsFromUnions(
+        unions: List<UnionEntity>,
+        placedIds: Set<String>,
+    ): List<ChildGroup> =
+        unions.mapNotNull { union ->
+            val parents = union.partnerIds().filter { it in placedIds }.distinct().sorted()
+            val children = union.childIdsList().filter { it in placedIds }.distinct().sorted()
+            if (parents.isEmpty() || children.isEmpty()) null
+            else ChildGroup(parentIds = parents, childIds = children, unionId = union.id)
+        }
 
     private fun childGroupsFromOpenLinks(
         people: List<PersonEntity>,

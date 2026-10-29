@@ -365,44 +365,41 @@ private fun TreeLinks(
             val top = card.top.dp.toPx()
             return Rect(left, top, left + cardW, top + card.height.dp.toPx())
         }
-        fun anchorX(id: String, rect: Rect): Float {
-            val side = cards[id]?.linkSide ?: LinkSide.Center
-            return TreeLinkGeometry.anchorX(rect.left, cardW, side)
-        }
         fun genderOf(id: String): String = byId[id]?.gender?.takeIf { it == "m" || it == "f" } ?: "u"
+        val minDrop = 24.dp.toPx()
         placement.childGroups.forEach { group ->
             val parentRects = group.parentIds.mapNotNull { id -> rectOf(id)?.let { id to it } }
             val childRects = group.childIds.mapNotNull { id -> rectOf(id)?.let { id to it } }
             if (parentRects.isEmpty() || childRects.isEmpty()) return@forEach
-            val originY = parentRects.maxOf { it.second.bottom }
-            val childLeft = childRects.minOf { it.second.left }
-            val childRight = childRects.maxOf { it.second.right }
-            val originX = TreeLinkGeometry.childrenHubX(
-                childRects.map { it.second.center.x },
-                childLeft,
-                childRight,
-            )
-            val origin = Offset(originX, originY)
-            parentRects.forEach { (parentId, parent) ->
-                val fromX = anchorX(parentId, parent)
-                val path = Path().apply {
-                    moveTo(fromX, parent.bottom)
-                    quadraticBezierTo(fromX, originY, origin.x, origin.y)
-                }
-                drawKinLink(path, genderOf(parentId), phase, group.open)
+            val parentBoxes = parentRects.map { (_, r) ->
+                TreeLinkGeometry.Box(r.left, r.top, r.right, r.bottom)
             }
+            val (unionX, unionY) = TreeLinkGeometry.unionHub(parentBoxes)
+            val childTop = childRects.minOf { it.second.top }
+            val stemY = TreeLinkGeometry.unionStemY(unionY, childTop, minDrop)
+            val childCenters = childRects.map { it.second.center.x }
+            val busLeft = childCenters.min()
+            val busRight = childCenters.max()
+            val stemPath = Path().apply {
+                moveTo(unionX, unionY)
+                lineTo(unionX, stemY)
+                if (childRects.size > 1) {
+                    if (unionX < busLeft) lineTo(busLeft, stemY)
+                    if (unionX > busRight) lineTo(busRight, stemY)
+                    moveTo(busLeft, stemY)
+                    lineTo(busRight, stemY)
+                }
+            }
+            val linkGender = group.parentIds.firstOrNull()?.let(::genderOf) ?: "u"
+            drawKinLink(stemPath, linkGender, phase, group.open)
             childRects.forEach { (childId, child) ->
                 val path = Path().apply {
-                    moveTo(origin.x, origin.y)
-                    val bend = (child.top - origin.y).coerceAtLeast(24.dp.toPx())
-                    cubicTo(
-                        origin.x,
-                        origin.y + bend * 0.45f,
-                        child.center.x,
-                        child.top - bend * 0.45f,
-                        child.center.x,
-                        child.top,
-                    )
+                    if (childRects.size > 1) {
+                        moveTo(child.center.x, stemY)
+                    } else {
+                        moveTo(unionX, stemY)
+                    }
+                    lineTo(child.center.x, child.top)
                 }
                 drawKinLink(path, genderOf(childId), phase, group.open)
             }

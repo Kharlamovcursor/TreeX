@@ -5,7 +5,12 @@ import ru.hdlabs.treex.data.local.UnionEntity
 
 /** Person → Union → children. One canonical union list for kinship and GEDCOM export. */
 
-data class ChildGroup(val parentIds: List<String>, val childIds: List<String>, val open: Boolean = false)
+data class ChildGroup(
+    val parentIds: List<String>,
+    val childIds: List<String>,
+    val open: Boolean = false,
+    val unionId: String? = null,
+)
 
 fun UnionEntity.childIdsList(): List<String> =
     if (childIds.isBlank()) emptyList() else childIds.split(',').map { it.trim() }.filter { it.isNotEmpty() }

@@ -85,46 +85,31 @@ object TreeSnapshotRenderer {
         }
         val hubPaint = Paint(linkPaint)
 
+        val minDrop = dp(24f)
         placement.childGroups.forEach { group ->
             val parentRects = group.parentIds.mapNotNull { id -> rectOf(id)?.let { id to it } }
             val childRects = group.childIds.mapNotNull { id -> rectOf(id)?.let { id to it } }
             if (parentRects.isEmpty() || childRects.isEmpty()) return@forEach
-            val originY = parentRects.maxOf { it.second.bottom }
-            val childLeft = childRects.minOf { it.second.left }
-            val childRight = childRects.maxOf { it.second.right }
-            val originX = TreeLinkGeometry.childrenHubX(
-                childRects.map { it.second.centerX() },
-                childLeft,
-                childRight,
-            )
-            fun anchorX(parentId: String, parent: RectF): Float {
-                val side = placement.cards.find { it.id == parentId }?.linkSide ?: LinkSide.Center
-                return TreeLinkGeometry.anchorX(parent.left, cardW, side)
+            val parentBoxes = parentRects.map { (_, r) ->
+                TreeLinkGeometry.Box(r.left, r.top, r.right, r.bottom)
             }
-            parentRects.forEach { (parentId, parent) ->
-                linkPaint.color = genderColor(parentId)
-                val fromX = anchorX(parentId, parent)
-                val path = Path().apply {
-                    moveTo(fromX, parent.bottom)
-                    quadTo(fromX, originY, originX, originY)
-                }
-                canvas.drawPath(path, linkPaint)
+            val (unionX, unionY) = TreeLinkGeometry.unionHub(parentBoxes)
+            val childTop = childRects.minOf { it.second.top }
+            val stemY = TreeLinkGeometry.unionStemY(unionY, childTop, minDrop)
+            val childCenters = childRects.map { it.second.centerX() }
+            val busLeft = childCenters.min()
+            val busRight = childCenters.max()
+            linkPaint.color = genderColor(group.parentIds.first())
+            canvas.drawLine(unionX, unionY, unionX, stemY, linkPaint)
+            if (childRects.size > 1) {
+                if (unionX < busLeft) canvas.drawLine(unionX, stemY, busLeft, stemY, linkPaint)
+                if (unionX > busRight) canvas.drawLine(unionX, stemY, busRight, stemY, linkPaint)
+                canvas.drawLine(busLeft, stemY, busRight, stemY, linkPaint)
             }
             childRects.forEach { (childId, child) ->
                 linkPaint.color = genderColor(childId)
-                val path = Path().apply {
-                    moveTo(originX, originY)
-                    val bend = max(dp(24f), child.top - originY)
-                    cubicTo(
-                        originX,
-                        originY + bend * 0.45f,
-                        child.centerX(),
-                        child.top - bend * 0.45f,
-                        child.centerX(),
-                        child.top,
-                    )
-                }
-                canvas.drawPath(path, linkPaint)
+                val fromX = if (childRects.size > 1) child.centerX() else unionX
+                canvas.drawLine(fromX, stemY, child.centerX(), child.top, linkPaint)
             }
         }
 

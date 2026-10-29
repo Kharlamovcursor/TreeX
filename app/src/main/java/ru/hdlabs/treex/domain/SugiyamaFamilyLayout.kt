@@ -57,7 +57,7 @@ internal object SugiyamaFamilyLayout {
         val walker = Walker(
             cardW = cardW,
             gapX = gapX,
-            siblingGap = 44f,
+            siblingGap = TreeLayout.CARD_GAP,
             byId = byId,
             ids = ids,
             extraParents = extraParents,
@@ -133,7 +133,7 @@ internal object SugiyamaFamilyLayout {
                     leftOf.getValue(previous.id) + cardW,
                     spousePairs.firstOrNull { previous.id in it }?.maxOf { leftOf.getValue(it) + cardW } ?: 0f,
                 )
-                val minLeft = prevRight + 44f
+                val minLeft = prevRight + TreeLayout.CARD_GAP
                 val currentLeft = minOf(
                     leftOf.getValue(current.id),
                     spousePairs.firstOrNull { current.id in it }?.minOf { leftOf.getValue(it) } ?: leftOf.getValue(current.id),
