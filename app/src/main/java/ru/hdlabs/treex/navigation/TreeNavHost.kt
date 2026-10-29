@@ -41,7 +41,7 @@ import ru.hdlabs.treex.ui.PersonDetailScreen
 import ru.hdlabs.treex.ui.PersonEditorScreen
 import ru.hdlabs.treex.ui.DeveloperSettingsScreen
 import ru.hdlabs.treex.ui.SettingsScreen
-import ru.hdlabs.treex.ui.TreeScreen
+import ru.hdlabs.treex.ui.tree.TreeScreen
 import ru.hdlabs.treex.ui.components.HdPrimaryButton
 import ru.hdlabs.treex.ui.components.HdSecondaryButton
 import ru.hdlabs.treex.ui.motion.LocalHdMotion

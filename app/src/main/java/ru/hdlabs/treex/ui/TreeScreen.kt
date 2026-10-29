@@ -91,7 +91,6 @@ import ru.hdlabs.treex.ui.theme.HdOrange
 import ru.hdlabs.treex.ui.theme.HdPanelElevated
 import ru.hdlabs.treex.ui.theme.HdTextPrimary
 import ru.hdlabs.treex.ui.theme.HdTextSecondary
-import ru.hdlabs.treex.ui.tree.TreeListStub
 
 @Composable
 fun TreeScreen(nav: NavHostController, highlight: String) {
@@ -358,13 +357,10 @@ fun TreeScreen(nav: NavHostController, highlight: String) {
                     }
                 }
                 else -> {
-                    TreeListStub(
-                        people = state.people,
-                        selectedId = focusId,
-                        freshId = activeHighlight,
+                    Text(
+                        "Экран перенесён в ui.tree.TreeScreen (Navigation).",
+                        color = HdTextSecondary,
                         modifier = Modifier.weight(1f),
-                        onPersonClick = onPersonPickedFromSearch,
-                        onOpenDetail = { nav.navigate(Routes.person(it.id)) },
                     )
                     if (focus != null && !landscape) {
                         if (actionsExpanded) {
