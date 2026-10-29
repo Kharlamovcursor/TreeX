@@ -18,6 +18,10 @@ data class TreePlacement(
     val knots: List<OpenKnot> = emptyList(),
 )
 
+/**
+ * Layout facade: reads kinship from [PersonEntity]/[UnionEntity], assigns Y via [generationMap],
+ * X via [SugiyamaFamilyLayout]. Rendering uses [TreePlacement] only — never infers kinship from pixels.
+ */
 object TreeLayout {
     const val CARD_W = 168f
     const val CARD_H = 108f
@@ -164,7 +168,7 @@ object TreeLayout {
         people: List<PersonEntity>,
         unions: List<UnionEntity>,
         openLinks: List<OpenLink> = emptyList(),
-        @Suppress("UNUSED_PARAMETER") homePersonId: String? = null,
+        homePersonId: String? = null,
     ): TreePlacement {
         if (people.isEmpty()) return TreePlacement(emptyList(), emptyList(), emptyList(), 0f, 0f)
         val byId = people.associateBy { it.id }
@@ -174,6 +178,7 @@ object TreeLayout {
             people = people,
             unions = unions,
             openLinks = openLinks,
+            homePersonId = homePersonId?.takeIf { it in byId },
             cardW = CARD_W,
             gapX = SPOUSE_GAP,
             gapY = ROW_GAP,

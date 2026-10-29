@@ -5,13 +5,8 @@ import ru.hdlabs.treex.data.local.UnionEntity
 import kotlin.math.max
 
 /**
- * Generational family layout from famtree (MIT, felipeplets/famtree, GenerationalLayout).
- *
- * A parent is centered on their own children. The blood relative stands on the
- * left of a couple and the married-in spouse on the right, so a new parent
- * (for example the wife's mother) sits on that person's side instead of
- * crossing the rest of the tree. Unmarried siblings come first; a sibling who
- * brings a spouse is placed at the edge of the group.
+ * Generational layout (famtree-style): parents centered over their children.
+ * Coordinates come only from kinship — never the other way around.
  */
 internal object SugiyamaFamilyLayout {
     data class Placed(val id: String, val left: Float, val top: Float, val height: Float)
@@ -20,6 +15,7 @@ internal object SugiyamaFamilyLayout {
         people: List<PersonEntity>,
         unions: List<UnionEntity>,
         openLinks: List<OpenLink>,
+        homePersonId: String?,
         cardW: Float,
         gapX: Float,
         gapY: Float,
@@ -37,48 +33,35 @@ internal object SugiyamaFamilyLayout {
             }
         }
         fun parentIdsOf(person: PersonEntity): List<String> =
-            (listOfNotNull(person.fatherId, person.motherId) + extraParents[person.id].orEmpty())
-                .filter { it in ids && it != person.id }
-                .distinct()
+            FamilyKinship.parentIdsOf(person, ids, extraParents)
 
-        val sameGenUnions = unions.filter {
-            it.partnerAId in ids && it.partnerBId in ids && it.partnerAId != it.partnerBId &&
-                generation[it.partnerAId] == generation[it.partnerBId]
-        }
+        val sameGenUnions = FamilyKinship.sameGenerationUnions(unions, ids, generation)
         fun unionsOf(id: String): List<UnionEntity> =
             sameGenUnions.filter { it.partnerAId == id || it.partnerBId == id }
 
-        fun otherOf(union: UnionEntity, id: String): String =
-            if (union.partnerAId == id) union.partnerBId else union.partnerAId
-
-        fun belongsToUnion(person: PersonEntity, union: UnionEntity): Boolean {
-            val parents = parentIdsOf(person)
-            if (parents.isEmpty()) return false
-            val partners = setOf(union.partnerAId, union.partnerBId)
-            return parents.all { it in partners }
-        }
+        fun belongsToUnion(person: PersonEntity, union: UnionEntity): Boolean =
+            FamilyKinship.belongsToUnion(person, union, ids, extraParents)
 
         fun childrenOfUnion(union: UnionEntity): List<PersonEntity> =
-            people.filter { belongsToUnion(it, union) }
+            FamilyKinship.childrenOfUnion(people, union, ids, extraParents)
 
         fun singleChildrenOf(id: String): List<PersonEntity> =
             people.filter { child ->
                 id in parentIdsOf(child) && unionsOf(id).none { belongsToUnion(child, it) }
             }
 
-        fun orderSiblings(children: List<PersonEntity>): List<PersonEntity> {
-            val sorted = children.sortedWith(compareBy({ it.birthDate }, { it.id }))
-            val singles = sorted.filter { unionsOf(it.id).isEmpty() }
-            val married = sorted.filter { unionsOf(it.id).isNotEmpty() }
-            return singles + married
-        }
+        fun orderSiblings(children: List<PersonEntity>): List<PersonEntity> =
+            FamilyKinship.orderSiblings(children, ::unionsOf)
 
         val walker = Walker(
             cardW = cardW,
             gapX = gapX,
             siblingGap = 44f,
+            byId = byId,
+            ids = ids,
+            extraParents = extraParents,
+            homePersonId = homePersonId,
             unionsOf = ::unionsOf,
-            otherOf = ::otherOf,
             childrenOfUnion = ::childrenOfUnion,
             singleChildrenOf = ::singleChildrenOf,
             orderSiblings = ::orderSiblings,
@@ -89,17 +72,7 @@ internal object SugiyamaFamilyLayout {
         roots.forEach { walker.placeSubtree(it.id) }
         people.sortedBy { it.id }.forEach { if (it.id !in walker.leftOf) walker.placeSubtree(it.id) }
         val leftOf = walker.leftOf
-        val spousePairs = sameGenUnions.map { setOf(it.partnerAId, it.partnerBId) }.toSet()
-        people.groupBy { generation[it.id] ?: 0 }.values.forEach { band ->
-            val ordered = band.sortedBy { leftOf.getValue(it.id) }
-            for (index in 1 until ordered.size) {
-                val previous = ordered[index - 1]
-                val current = ordered[index]
-                val gap = if (setOf(previous.id, current.id) in spousePairs) gapX else 44f
-                val minLeft = leftOf.getValue(previous.id) + cardW + gap
-                if (leftOf.getValue(current.id) < minLeft) leftOf[current.id] = minLeft
-            }
-        }
+        resolveGenerationOverlaps(leftOf, people, generation, sameGenUnions, cardW, gapX)
 
         val minLeft = leftOf.values.minOrNull() ?: 0f
         val shift = if (minLeft < pad) pad - minLeft else 0f
@@ -125,12 +98,36 @@ internal object SugiyamaFamilyLayout {
         }
     }
 
+    private fun resolveGenerationOverlaps(
+        leftOf: MutableMap<String, Float>,
+        people: List<PersonEntity>,
+        generation: Map<String, Int>,
+        sameGenUnions: List<UnionEntity>,
+        cardW: Float,
+        gapX: Float,
+    ) {
+        val spousePairs = sameGenUnions.map { setOf(it.partnerAId, it.partnerBId) }.toSet()
+        people.groupBy { generation[it.id] ?: 0 }.values.forEach { band ->
+            val ordered = band.sortedBy { leftOf.getValue(it.id) }
+            for (index in 1 until ordered.size) {
+                val previous = ordered[index - 1]
+                val current = ordered[index]
+                val gap = if (setOf(previous.id, current.id) in spousePairs) gapX else 44f
+                val minLeft = leftOf.getValue(previous.id) + cardW + gap
+                if (leftOf.getValue(current.id) < minLeft) leftOf[current.id] = minLeft
+            }
+        }
+    }
+
     private class Walker(
         private val cardW: Float,
         private val gapX: Float,
         private val siblingGap: Float,
+        private val byId: Map<String, PersonEntity>,
+        private val ids: Set<String>,
+        private val extraParents: Map<String, List<String>>,
+        private val homePersonId: String?,
         private val unionsOf: (String) -> List<UnionEntity>,
-        private val otherOf: (UnionEntity, String) -> String,
         private val childrenOfUnion: (UnionEntity) -> List<PersonEntity>,
         private val singleChildrenOf: (String) -> List<PersonEntity>,
         private val orderSiblings: (List<PersonEntity>) -> List<PersonEntity>,
@@ -145,7 +142,7 @@ internal object SugiyamaFamilyLayout {
             if (!placing.add(id)) return cursor + cardW / 2f
             val union = unionsOf(id).firstOrNull { it.id !in placedUnion }
             if (union != null) {
-                placeUnion(union, id)
+                placeUnion(union)
                 placing.remove(id)
                 return leftOf.getValue(id) + cardW / 2f
             }
@@ -164,9 +161,8 @@ internal object SugiyamaFamilyLayout {
             return left + cardW / 2f
         }
 
-        private fun placeUnion(union: UnionEntity, anchor: String): Float {
+        private fun placeUnion(union: UnionEntity): Float {
             placedUnion += union.id
-            val other = otherOf(union, anchor)
             val kids = orderSiblings(childrenOfUnion(union)).map { it.id }
             val center = if (kids.isNotEmpty()) {
                 centerOver(kids)
@@ -175,14 +171,28 @@ internal object SugiyamaFamilyLayout {
                 cursor += cardW * 2 + gapX + siblingGap
                 reserved + (cardW + gapX) / 2f
             }
-            leftOf[anchor] = center - gapX / 2f - cardW
-            leftOf[other] = center + gapX / 2f
-            cursor = max(cursor, leftOf.getValue(other) + cardW + siblingGap)
+            val leftId = FamilyKinship.leftPartnerId(
+                union = union,
+                byId = byId,
+                ids = ids,
+                extraParents = extraParents,
+                parentColumnCenter = { partnerId ->
+                    val parents = FamilyKinship.parentIdsOf(byId.getValue(partnerId), ids, extraParents)
+                    if (parents.isEmpty()) return@leftPartnerId null
+                    parents.mapNotNull { parentId -> leftOf[parentId]?.plus(cardW / 2f) }.takeIf { it.size == parents.size }
+                        ?.average()?.toFloat()
+                },
+                homePersonId = homePersonId,
+            )
+            val rightId = FamilyKinship.otherPartner(union, leftId)
+            leftOf[leftId] = center - gapX / 2f - cardW
+            leftOf[rightId] = center + gapX / 2f
+            cursor = max(cursor, leftOf.getValue(rightId) + cardW + siblingGap)
             return center
         }
 
-        private fun centerOver(ids: List<String>): Float {
-            val xs = ids.map { placeSubtree(it) }
+        private fun centerOver(childIds: List<String>): Float {
+            val xs = childIds.map { placeSubtree(it) }
             return (xs.first() + xs.last()) / 2f
         }
     }
