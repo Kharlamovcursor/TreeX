@@ -1,27 +1,19 @@
 package ru.hdlabs.treex.domain
 
-import ru.hdlabs.treex.backup.FamilyBackupMapper
-import ru.hdlabs.treex.backup.UnionRecord
 import ru.hdlabs.treex.data.local.PersonEntity
 import ru.hdlabs.treex.domain.graph.GenealogyGraph
-import ru.hdlabs.treex.domain.graph.GenealogyGraphMapper
+import ru.hdlabs.treex.domain.graph.Gender
 
 data class SiblingGroups(
     val full: List<PersonEntity>,
     val half: List<PersonEntity>,
 )
 
-private fun graphFromUnions(people: List<PersonEntity>, unions: List<UnionRecord>): GenealogyGraph {
-    val (families, children) = FamilyBackupMapper.fromUnionRecords(unions)
-    return GenealogyGraphMapper.fromFamilies(people.filter { !it.vacant }, families, children)
-}
-
 fun siblingGroupsOf(
     person: PersonEntity,
     people: List<PersonEntity>,
-    unions: List<UnionRecord> = emptyList(),
+    graph: GenealogyGraph,
 ): SiblingGroups {
-    val graph = graphFromUnions(people, unions)
     val full = mutableListOf<PersonEntity>()
     val half = mutableListOf<PersonEntity>()
     people.forEach { other ->
@@ -55,8 +47,8 @@ private fun siblingKind(person: PersonEntity, other: PersonEntity, graph: Geneal
 private fun fatherSlot(graph: GenealogyGraph, childId: String): String? {
     val fam = graph.familyWhereChild(childId) ?: return null
     return when {
-        graph.person(fam.partnerAId.orEmpty())?.gender?.name == "MALE" -> fam.partnerAId
-        graph.person(fam.partnerBId.orEmpty())?.gender?.name == "MALE" -> fam.partnerBId
+        graph.person(fam.partnerAId.orEmpty())?.gender == Gender.MALE -> fam.partnerAId
+        graph.person(fam.partnerBId.orEmpty())?.gender == Gender.MALE -> fam.partnerBId
         else -> fam.partnerAId
     }
 }
@@ -64,8 +56,8 @@ private fun fatherSlot(graph: GenealogyGraph, childId: String): String? {
 private fun motherSlot(graph: GenealogyGraph, childId: String): String? {
     val fam = graph.familyWhereChild(childId) ?: return null
     return when {
-        graph.person(fam.partnerAId.orEmpty())?.gender?.name == "FEMALE" -> fam.partnerAId
-        graph.person(fam.partnerBId.orEmpty())?.gender?.name == "FEMALE" -> fam.partnerBId
+        graph.person(fam.partnerAId.orEmpty())?.gender == Gender.FEMALE -> fam.partnerAId
+        graph.person(fam.partnerBId.orEmpty())?.gender == Gender.FEMALE -> fam.partnerBId
         else -> fam.partnerBId
     }
 }
@@ -75,9 +67,8 @@ fun siblingsMissingParent(
     anchor: PersonEntity,
     newParentId: String,
     asFather: Boolean,
-    unions: List<UnionRecord> = emptyList(),
+    graph: GenealogyGraph,
 ): List<PersonEntity> {
-    val graph = graphFromUnions(people, unions)
     val sharedOther = if (asFather) motherSlot(graph, anchor.id) else fatherSlot(graph, anchor.id)
     if (sharedOther.isNullOrBlank()) return emptyList()
     return people.filter { person ->
@@ -94,10 +85,8 @@ fun siblingsMissingParent(
 fun halfSiblingCaption(
     person: PersonEntity,
     other: PersonEntity,
-    unions: List<UnionRecord> = emptyList(),
-    people: List<PersonEntity> = emptyList(),
+    graph: GenealogyGraph,
 ): String {
-    val graph = graphFromUnions(if (people.isEmpty()) listOf(person, other) else people, unions)
     val pf = fatherSlot(graph, person.id)
     val pm = motherSlot(graph, person.id)
     val of = fatherSlot(graph, other.id)

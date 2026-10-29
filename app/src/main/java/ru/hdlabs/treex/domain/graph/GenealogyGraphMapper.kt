@@ -58,8 +58,6 @@ object GenealogyGraphMapper {
         return GenealogyGraph(persons = personMap, families = familyMap)
     }
 
-    internal fun legacyFamilyId(childId: String): String = "legacy-$childId"
-
     internal fun parseChildIds(unionId: String, raw: String): List<String> {
         if (raw.isBlank()) return emptyList()
         val parts = raw.split(',').map { it.trim() }.filter { it.isNotEmpty() }

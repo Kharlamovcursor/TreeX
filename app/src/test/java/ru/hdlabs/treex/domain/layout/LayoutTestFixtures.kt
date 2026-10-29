@@ -31,7 +31,7 @@ object LayoutTestFixtures {
             "f1" to Family("f1", "p1", "p1s", listOf("c1", "c2", "c3")),
             "f2" to Family("f2", "p2", "p2s", listOf("c4", "c5")),
             "open-f" to Family("open-f", null, "open", listOf("openChild")),
-            "legacy-leg" to Family(GenealogyGraphMapper.legacyFamilyId("leg"), "gp1", null, listOf("leg")),
+            "legacy-leg" to Family("legacy-leg", "gp1", null, listOf("leg")),
         )
         return GenealogyGraph(people.associateBy { it.id }, famMap)
     }

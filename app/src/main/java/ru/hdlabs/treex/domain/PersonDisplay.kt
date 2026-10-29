@@ -1,7 +1,7 @@
 package ru.hdlabs.treex.domain
 
 import ru.hdlabs.treex.data.local.PersonEntity
-import ru.hdlabs.treex.backup.UnionRecord
+import ru.hdlabs.treex.domain.graph.GenealogyGraph
 import java.time.LocalDate
 import java.time.Period
 import java.time.format.DateTimeFormatter
@@ -166,14 +166,8 @@ fun acceptsAsSpouse(hostGender: String, candidateGender: String): Boolean = when
     else -> true
 }
 
-fun spouseIdsOf(unions: List<UnionRecord>, personId: String): List<String> =
-    unions.mapNotNull { union ->
-        when (personId) {
-            union.partnerAId -> union.partnerBId
-            union.partnerBId -> union.partnerAId
-            else -> null
-        }
-    }.distinct()
+fun spouseIdsOf(graph: GenealogyGraph, personId: String): List<String> =
+    graph.spousesOf(personId).map { it.id }.distinct()
 
 fun stableUnionId(firstId: String, secondId: String): String {
     val a = minOf(firstId, secondId)

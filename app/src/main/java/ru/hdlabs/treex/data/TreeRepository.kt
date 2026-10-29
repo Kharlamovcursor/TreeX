@@ -22,7 +22,6 @@ import ru.hdlabs.treex.backup.PersonRecord
 import ru.hdlabs.treex.backup.FamilyBackupMapper
 import ru.hdlabs.treex.backup.TreeCodec
 import ru.hdlabs.treex.backup.TreeDocument
-import ru.hdlabs.treex.backup.UnionRecord
 import ru.hdlabs.treex.data.local.AppDatabase
 import ru.hdlabs.treex.data.local.FamilyChildEntity
 import ru.hdlabs.treex.data.local.FamilyEntity

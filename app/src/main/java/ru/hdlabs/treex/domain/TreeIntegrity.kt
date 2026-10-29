@@ -1,7 +1,5 @@
 package ru.hdlabs.treex.domain
 
-import ru.hdlabs.treex.backup.UnionRecord
-import ru.hdlabs.treex.backup.partnerIds
 import ru.hdlabs.treex.data.local.FamilyChildEntity
 import ru.hdlabs.treex.data.local.FamilyEntity
 import ru.hdlabs.treex.data.local.PersonEntity
@@ -36,21 +34,6 @@ object TreeIntegrity {
         }.map { it.id }.toSet()
         val keptChildren = familyChildren.filter { it.familyId in keptFamilies && it.childId in living }
         return families.filter { it.id in keptFamilies } to keptChildren
-    }
-
-    fun livingUnions(unions: List<UnionRecord>, people: List<PersonEntity>): List<UnionRecord> {
-        val byId = people.associateBy { it.id }
-        val living = livingIds(people)
-        return unions.filter { union ->
-            val partners = union.partnerIds().filter { it in living }
-            val children = union.childIds.filter { it in living }
-            when {
-                partners.size >= 2 -> partners.all { id -> byId[id]?.let { isLiving(it) } == true }
-                partners.size == 1 && children.isNotEmpty() ->
-                    byId[partners.single()]?.let { isLiving(it) } == true
-                else -> false
-            }
-        }
     }
 
     fun livingParentIds(

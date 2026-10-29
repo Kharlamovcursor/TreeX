@@ -1,7 +1,7 @@
 package ru.hdlabs.treex.domain
 
-import ru.hdlabs.treex.backup.UnionRecord
 import ru.hdlabs.treex.data.local.PersonEntity
+import ru.hdlabs.treex.domain.graph.GenealogyGraph
 
 data class SpouseDraft(
     val personId: String,
@@ -64,12 +64,18 @@ fun suggestedParentFamilyName(host: PersonEntity): String = when (host.gender) {
     else -> host.lastName.trim()
 }
 
-fun spouseDraftsOf(unions: List<UnionRecord>, personId: String): List<SpouseDraft> =
-    unions.mapNotNull { union ->
-        val other = when (personId) {
-            union.partnerAId -> union.partnerBId
-            union.partnerBId -> union.partnerAId
+fun spouseDraftsOf(
+    graph: GenealogyGraph,
+    personId: String,
+    families: List<FamilyEntity> = emptyList(),
+): List<SpouseDraft> {
+    val meta = families.associateBy { it.id }
+    return graph.familiesOf(personId).mapNotNull { fam ->
+        val otherId = when (personId) {
+            fam.partnerAId -> fam.partnerBId
+            fam.partnerBId -> fam.partnerAId
             else -> null
-        }
-        other?.let { SpouseDraft(it, union.marriedOn) }
+        } ?: return@mapNotNull null
+        SpouseDraft(otherId, meta[fam.id]?.marriedOn.orEmpty())
     }.distinctBy { it.personId }
+}

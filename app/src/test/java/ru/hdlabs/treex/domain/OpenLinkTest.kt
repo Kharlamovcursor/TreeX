@@ -3,8 +3,10 @@ package ru.hdlabs.treex.domain
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
-import ru.hdlabs.treex.backup.UnionRecord
+import ru.hdlabs.treex.data.local.FamilyChildEntity
+import ru.hdlabs.treex.data.local.FamilyEntity
 import ru.hdlabs.treex.data.local.PersonEntity
+import ru.hdlabs.treex.domain.graph.GenealogyGraphMapper
 
 class OpenLinkTest {
     @Test
@@ -12,8 +14,13 @@ class OpenLinkTest {
         val father = PersonEntity(id = "f", gender = "m")
         val mother = PersonEntity(id = "m", gender = "f")
         val child = PersonEntity(id = "c")
-        val unions = listOf(UnionRecord("u", "f", "m", childIds = listOf("c")))
-        val links = linksAfterRemoval(father, listOf(father, mother, child), unions)
+        val people = listOf(father, mother, child)
+        val graph = GenealogyGraphMapper.fromFamilies(
+            people,
+            listOf(FamilyEntity("u", "f", "m")),
+            listOf(FamilyChildEntity("u", "c")),
+        )
+        val links = linksAfterRemoval(father, people, graph)
         assertTrue(links.any { it.slot == "spouse" && it.ownerId == "m" })
         assertTrue(links.any { it.slot == "father" && it.ownerId == "c" && it.anchorId == "m" })
         assertTrue(links.none { it.slot == "bridge" })
@@ -24,11 +31,19 @@ class OpenLinkTest {
         val grand = PersonEntity(id = "g", gender = "m")
         val middle = PersonEntity(id = "f", gender = "m")
         val child = PersonEntity(id = "c")
-        val unions = listOf(
-            UnionRecord("u1", "g", null, childIds = listOf("f")),
-            UnionRecord("u2", "f", null, childIds = listOf("c")),
+        val people = listOf(grand, middle, child)
+        val graph = GenealogyGraphMapper.fromFamilies(
+            people,
+            listOf(
+                FamilyEntity("u1", "g", null),
+                FamilyEntity("u2", "f", null),
+            ),
+            listOf(
+                FamilyChildEntity("u1", "f"),
+                FamilyChildEntity("u2", "c"),
+            ),
         )
-        val bridge = linksAfterRemoval(middle, listOf(grand, middle, child), unions).single { it.slot == "bridge" }
+        val bridge = linksAfterRemoval(middle, people, graph).single { it.slot == "bridge" }
         assertEquals("g", bridge.anchorId)
         assertEquals(listOf("c"), bridge.childIds)
         assertTrue(bridge.anchorIsParent)

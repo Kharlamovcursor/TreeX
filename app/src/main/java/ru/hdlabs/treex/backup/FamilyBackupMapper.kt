@@ -7,7 +7,7 @@ import ru.hdlabs.treex.domain.graph.GenealogyGraphMapper
 
 /**
  * Canonical storage: [FamilyEntity] + [FamilyChildEntity].
- * [UnionRecord] is wire projection for JSON Git sync and runtime read helpers until 4c-2b.
+ * [UnionRecord] is wire projection for JSON Git sync only (see [TreeRepository.readLocked]).
  */
 object FamilyBackupMapper {
 
