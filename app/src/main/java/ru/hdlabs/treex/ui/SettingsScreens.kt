@@ -76,6 +76,8 @@ fun SettingsScreen(nav: NavHostController) {
     var reportLoading by remember { mutableStateOf(false) }
     var snapshotLoading by remember { mutableStateOf(false) }
     var feedbackMessage by remember { mutableStateOf<String?>(null) }
+    var wipeStep by remember { mutableStateOf(0) }
+    var wipeLoading by remember { mutableStateOf(false) }
 
     HdScaffold(title = "Настройки", onBack = { nav.popBackStack() }, progressMessage = progress) {
         HdCard {
@@ -201,6 +203,21 @@ fun SettingsScreen(nav: NavHostController) {
             )
         }
         Spacer(Modifier.height(12.dp))
+        HdCard {
+            Text("Очистить древо", color = HdOrange, fontWeight = FontWeight.SemiBold)
+            Text(
+                "Удалить всех людей и связи на этом телефоне. Перед очисткой сохраняется снимок в «История» (настройки разработчика). " +
+                    "Git не меняется, пока вы снова не отправите древо.",
+                color = HdTextSecondary,
+                modifier = Modifier.padding(top = 6.dp, bottom = 10.dp),
+            )
+            HdSecondaryButton(
+                "Стереть всё древо на телефоне",
+                loading = wipeLoading,
+                loadingText = "Очистка…",
+            ) { wipeStep = 1 }
+        }
+        Spacer(Modifier.height(12.dp))
         HdSecondaryButton("Инструкция") { nav.navigate(Routes.USER_GUIDE) }
         Spacer(Modifier.height(12.dp))
         HdSecondaryButton("Настройки разработчика") { nav.navigate(Routes.DEVELOPER_SETTINGS) }
@@ -220,6 +237,46 @@ fun SettingsScreen(nav: NavHostController) {
             title = { Text("Обратная связь") },
             text = { Text(text, color = HdTextSecondary) },
             confirmButton = { HdPrimaryButton("Понятно") { feedbackMessage = null } },
+        )
+    }
+    if (wipeStep == 1) {
+        AlertDialog(
+            onDismissRequest = { wipeStep = 0 },
+            title = { Text("Стереть древо?") },
+            text = {
+                Text(
+                    "Все карточки на этом телефоне будут удалены. Снимок перед удалением попадёт в историю.",
+                    color = HdTextSecondary,
+                )
+            },
+            confirmButton = { HdPrimaryButton("Продолжить") { wipeStep = 2 } },
+            dismissButton = { HdSecondaryButton("Отмена") { wipeStep = 0 } },
+        )
+    }
+    if (wipeStep == 2) {
+        AlertDialog(
+            onDismissRequest = { wipeStep = 0 },
+            title = { Text("Подтвердите") },
+            text = { Text("После очистки можно импортировать древо заново или начать с пустого.", color = HdTextSecondary) },
+            confirmButton = {
+                HdPrimaryButton("Стереть", loading = wipeLoading, loadingText = "…") {
+                    scope.launch {
+                        wipeLoading = true
+                        progress = "Очистка древа…"
+                        try {
+                            feedbackMessage = repo.wipeTree()
+                            wipeStep = 0
+                        } catch (e: Exception) {
+                            feedbackMessage = e.message ?: "Не удалось очистить"
+                            wipeStep = 0
+                        } finally {
+                            wipeLoading = false
+                            progress = null
+                        }
+                    }
+                }
+            },
+            dismissButton = { HdSecondaryButton("Отмена") { wipeStep = 0 } },
         )
     }
 }

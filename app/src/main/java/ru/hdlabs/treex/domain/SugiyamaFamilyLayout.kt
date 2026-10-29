@@ -23,7 +23,7 @@ internal object SugiyamaFamilyLayout {
         heights: Map<String, Float>,
     ): List<Placed> {
         if (people.isEmpty()) return emptyList()
-        val unions = UnionEr.reconcileChildMembership(people, unions)
+        val unions = UnionEr.compactUnions(people, unions)
         val ids = people.map { it.id }.toSet()
         val byId = people.associateBy { it.id }
         val generation = TreeLayout.generationMap(people, unions, openLinks)

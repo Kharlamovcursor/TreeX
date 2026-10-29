@@ -62,7 +62,7 @@ object TreeLayout {
         openLinks: List<OpenLink> = emptyList(),
     ): Map<String, Int> {
         if (people.isEmpty()) return emptyMap()
-        val reconciled = UnionEr.reconcileChildMembership(people, unions)
+        val reconciled = UnionEr.compactUnions(people, unions)
         val byId = people.associateBy { it.id }
         val living = TreeIntegrity.livingIds(people)
         val ids = living
@@ -177,7 +177,7 @@ object TreeLayout {
         if (people.isEmpty()) return TreePlacement(emptyList(), emptyList(), emptyList(), 0f, 0f)
         val livingPeople = TreeIntegrity.livingPeople(people)
         if (livingPeople.isEmpty()) return TreePlacement(emptyList(), emptyList(), emptyList(), 0f, 0f)
-        val reconciledUnions = UnionEr.reconcileChildMembership(people, unions)
+        val reconciledUnions = UnionEr.compactUnions(people, unions)
         val livingUnions = TreeIntegrity.livingUnions(reconciledUnions, people)
         val byId = people.associateBy { it.id }
         val heights = livingPeople.associate { it.id to cardHeight(it) }
@@ -201,7 +201,7 @@ object TreeLayout {
             TreeCard(node.id, node.left, node.top, rowHeight[gen] ?: node.height)
         }
         val placedIds = cards.map { it.id }.toSet()
-        val childGroups = UnionEr.childGroupsFromUnions(livingUnions, placedIds, livingPeople) +
+        val childGroups = UnionEr.childGroupsByParentPairs(livingPeople, placedIds, livingUnions) +
             childGroupsFromOpenLinks(livingPeople, cards, openLinks, byId, reconciledUnions)
         val livingIds = livingPeople.map { it.id }.toSet()
         val spouseLinks = livingUnions.filter { it.hasBothPartners() }.mapNotNull { u ->

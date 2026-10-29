@@ -48,11 +48,10 @@ internal object FamilyKinship {
         ids: Set<String>,
         unions: List<UnionEntity>,
         extraParents: Map<String, List<String>>,
-    ): List<PersonEntity> {
-        val explicit = union.childIdsList().filter { it in ids }.mapNotNull { id -> people.find { it.id == id } }
-        if (explicit.isNotEmpty()) return explicit
-        return people.filter { belongsToUnion(it, union, ids, unions, extraParents) }
-    }
+    ): List<PersonEntity> =
+        UnionEr.childrenOfUnion(people, union, ids, unions).ifEmpty {
+            people.filter { belongsToUnion(it, union, ids, unions, extraParents) }
+        }
 
     fun orderSiblings(
         children: List<PersonEntity>,

@@ -123,7 +123,7 @@ class TreeRepository(
             database.withTransaction {
                 val people = peopleDao.all()
                 val current = unionDao.all()
-                val merged = mergeInferredParentUnions(current, people)
+                val merged = UnionEr.compactUnions(people, mergeInferredParentUnions(current, people))
                 if (merged != current) {
                     unionDao.deleteAll()
                     unionDao.upsertAll(merged)
@@ -144,8 +144,9 @@ class TreeRepository(
                 fixes.forEach { peopleDao.upsert(it) }
                 if (fixes.isNotEmpty()) changed = true
                 val unions = unionDao.all()
-                val kept = TreeIntegrity.livingUnions(unions, people)
-                if (kept.size != unions.size) {
+                val compact = UnionEr.compactUnions(people, unions)
+                val kept = TreeIntegrity.livingUnions(compact, people)
+                if (kept.sortedBy { it.id } != unions.sortedBy { it.id }) {
                     unionDao.deleteAll()
                     unionDao.upsertAll(kept)
                     changed = true
