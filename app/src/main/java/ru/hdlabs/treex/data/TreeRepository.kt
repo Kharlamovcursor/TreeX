@@ -48,6 +48,8 @@ import ru.hdlabs.treex.domain.TreeDataValidator
 import ru.hdlabs.treex.domain.TreeIntegrity
 import ru.hdlabs.treex.domain.UnionEr
 import ru.hdlabs.treex.domain.UnionErAttach
+import ru.hdlabs.treex.domain.graph.GenealogyGraph
+import ru.hdlabs.treex.domain.graph.GenealogyGraphMapper
 import ru.hdlabs.treex.domain.familyTreeStateFrom
 import ru.hdlabs.treex.domain.fullName
 import ru.hdlabs.treex.domain.hasBothPartners
@@ -167,6 +169,11 @@ class TreeRepository(
 
     suspend fun validateTree(): List<DataIssue> = mutex.withLock {
         TreeDataValidator.validate(peopleDao.all(), unionDao.all())
+    }
+
+    /** Read-model snapshot for genealogy graph (phase 1); not used by UI yet. */
+    suspend fun buildGraphSnapshot(): GenealogyGraph = mutex.withLock {
+        GenealogyGraphMapper.fromEntities(peopleDao.all(), unionDao.all())
     }
 
     suspend fun previewDeletePerson(id: String): DeletePersonImpact? = mutex.withLock {
