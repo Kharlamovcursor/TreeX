@@ -68,8 +68,10 @@ internal object SugiyamaFamilyLayout {
             singleChildrenOf = ::singleChildrenOf,
             orderSiblings = ::orderSiblings,
         )
+        val home = homePersonId?.takeIf { it in ids }
+        if (home != null) walker.placeSubtree(home)
         val roots = people
-            .filter { parentIdsOf(it).isEmpty() }
+            .filter { parentIdsOf(it).isEmpty() && it.id != home }
             .sortedWith(compareBy({ unionsOf(it.id).isEmpty() }, { it.birthDate }, { it.id }))
         roots.forEach { walker.placeSubtree(it.id) }
         people.sortedBy { it.id }.forEach { if (it.id !in walker.leftOf) walker.placeSubtree(it.id) }
@@ -186,14 +188,6 @@ internal object SugiyamaFamilyLayout {
 
         private fun placeUnion(union: UnionEntity): Float {
             placedUnion += union.id
-            val kids = orderSiblings(childrenOfUnion(union)).map { it.id }
-            val center = if (kids.isNotEmpty()) {
-                centerOver(kids)
-            } else {
-                val reserved = cursor + siblingGap / 2f
-                cursor += cardW * 2 + gapX + siblingGap
-                reserved + (cardW + gapX) / 2f
-            }
             val leftId = FamilyKinship.leftPartnerId(
                 union = union,
                 byId = byId,
@@ -209,6 +203,32 @@ internal object SugiyamaFamilyLayout {
                 homePersonId = homePersonId,
             )
             val rightId = FamilyKinship.otherPartner(union, leftId)
+            val kids = orderSiblings(childrenOfUnion(union)).map { it.id }
+
+            if (kids.isEmpty() && rightId != null) {
+                when {
+                    leftId in leftOf && rightId !in leftOf -> {
+                        leftOf[rightId] = leftOf.getValue(leftId) + cardW + gapX
+                        val center = leftOf.getValue(leftId) + cardW + gapX / 2f
+                        cursor = max(cursor, leftOf.getValue(rightId) + cardW + siblingGap)
+                        return center
+                    }
+                    rightId in leftOf && leftId !in leftOf -> {
+                        leftOf[leftId] = leftOf.getValue(rightId) - cardW - gapX
+                        val center = leftOf.getValue(leftId) + cardW + gapX / 2f
+                        cursor = max(cursor, leftOf.getValue(rightId) + cardW + siblingGap)
+                        return center
+                    }
+                }
+            }
+
+            val center = if (kids.isNotEmpty()) {
+                centerOver(kids)
+            } else {
+                val reserved = cursor + siblingGap / 2f
+                cursor += cardW * 2 + gapX + siblingGap
+                reserved + (cardW + gapX) / 2f
+            }
             if (rightId == null) {
                 leftOf[leftId] = center - cardW / 2f
                 cursor = max(cursor, leftOf.getValue(leftId) + cardW + siblingGap)

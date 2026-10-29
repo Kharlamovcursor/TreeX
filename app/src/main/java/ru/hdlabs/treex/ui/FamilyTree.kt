@@ -72,8 +72,10 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 import ru.hdlabs.treex.data.local.PersonEntity
 import ru.hdlabs.treex.data.local.UnionEntity
+import ru.hdlabs.treex.domain.LinkSide
 import ru.hdlabs.treex.domain.OpenLink
 import ru.hdlabs.treex.domain.TreeLayout
+import ru.hdlabs.treex.domain.TreeLinkGeometry
 import ru.hdlabs.treex.domain.TreePlacement
 import ru.hdlabs.treex.diagnostic.AppEventLog
 import ru.hdlabs.treex.domain.fullName
@@ -363,19 +365,29 @@ private fun TreeLinks(
             val top = card.top.dp.toPx()
             return Rect(left, top, left + cardW, top + card.height.dp.toPx())
         }
+        fun anchorX(id: String, rect: Rect): Float {
+            val side = cards[id]?.linkSide ?: LinkSide.Center
+            return TreeLinkGeometry.anchorX(rect.left, cardW, side)
+        }
         fun genderOf(id: String): String = byId[id]?.gender?.takeIf { it == "m" || it == "f" } ?: "u"
         placement.childGroups.forEach { group ->
             val parentRects = group.parentIds.mapNotNull { id -> rectOf(id)?.let { id to it } }
             val childRects = group.childIds.mapNotNull { id -> rectOf(id)?.let { id to it } }
             if (parentRects.isEmpty() || childRects.isEmpty()) return@forEach
-            val origin = Offset(
-                parentRects.map { it.second.center.x }.average().toFloat(),
-                parentRects.maxOf { it.second.bottom },
+            val originY = parentRects.maxOf { it.second.bottom }
+            val childLeft = childRects.minOf { it.second.left }
+            val childRight = childRects.maxOf { it.second.right }
+            val originX = TreeLinkGeometry.childrenHubX(
+                childRects.map { it.second.center.x },
+                childLeft,
+                childRight,
             )
+            val origin = Offset(originX, originY)
             parentRects.forEach { (parentId, parent) ->
+                val fromX = anchorX(parentId, parent)
                 val path = Path().apply {
-                    moveTo(parent.center.x, parent.bottom)
-                    quadraticBezierTo(parent.center.x, origin.y, origin.x, origin.y)
+                    moveTo(fromX, parent.bottom)
+                    quadraticBezierTo(fromX, originY, origin.x, origin.y)
                 }
                 drawKinLink(path, genderOf(parentId), phase, group.open)
             }

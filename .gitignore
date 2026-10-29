@@ -8,6 +8,7 @@
 .externalNativeBuild
 .cxx
 app/build
+.kotlin/
 /app/release
 keystore.properties
 signing-credentials.local.txt

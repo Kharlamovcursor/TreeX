@@ -72,5 +72,5 @@ fun detachedFromMainPersonIds(
     homePersonId: String?,
 ): Set<String> {
     val main = mainTreeComponent(people, unions, homePersonId)
-    return people.map { it.id }.filter { it !in main }.toSet()
+    return people.filter { it.id !in main && !it.vacant }.map { it.id }.toSet()
 }

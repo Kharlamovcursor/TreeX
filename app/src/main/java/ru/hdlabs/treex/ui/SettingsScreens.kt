@@ -78,6 +78,7 @@ fun SettingsScreen(nav: NavHostController) {
     var feedbackMessage by remember { mutableStateOf<String?>(null) }
     var wipeStep by remember { mutableStateOf(0) }
     var wipeLoading by remember { mutableStateOf(false) }
+    var purgeVacantLoading by remember { mutableStateOf(false) }
 
     HdScaffold(title = "Настройки", onBack = { nav.popBackStack() }, progressMessage = progress) {
         HdCard {
@@ -204,10 +205,68 @@ fun SettingsScreen(nav: NavHostController) {
         }
         Spacer(Modifier.height(12.dp))
         HdCard {
+            Text("Git и отладка", color = HdTextPrimary, fontWeight = FontWeight.SemiBold)
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 10.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("Не подгружать древо из Git", color = HdTextPrimary)
+                    Text(
+                        "Пока включено — после очистки или при пустом древе Git не подтягивается сам. " +
+                            "Загрузка вручную с экрана древа остаётся.",
+                        color = HdTextSecondary,
+                        modifier = Modifier.padding(top = 4.dp),
+                    )
+                }
+                Switch(
+                    checked = settings.pauseGitAutoSync,
+                    onCheckedChange = { paused ->
+                        scope.launch {
+                            app.container.settingsRepository.update { it.copy(pauseGitAutoSync = paused) }
+                        }
+                    },
+                )
+            }
+            Spacer(Modifier.height(10.dp))
+            HdSecondaryButton(
+                "Удалить все пустые места",
+                loading = purgeVacantLoading,
+                loadingText = "…",
+            ) {
+                scope.launch {
+                    purgeVacantLoading = true
+                    progress = "Удаление пустых мест…"
+                    try {
+                        val n = repo.purgeAllVacantSlots()
+                        feedbackMessage = if (n > 0) {
+                            "Удалено пустых мест: $n."
+                        } else {
+                            "Пустых мест не было."
+                        }
+                    } catch (e: Exception) {
+                        feedbackMessage = e.message ?: "Не удалось удалить пустые места"
+                    } finally {
+                        purgeVacantLoading = false
+                        progress = null
+                    }
+                }
+            }
+            Text(
+                "«Пустое место» — карточка после удаления человека; они не считаются в «чел.», но остаются в базе, пока не убрать.",
+                color = HdTextSecondary,
+                modifier = Modifier.padding(top = 6.dp),
+            )
+        }
+        Spacer(Modifier.height(12.dp))
+        HdCard {
             Text("Очистить древо", color = HdOrange, fontWeight = FontWeight.SemiBold)
             Text(
-                "Удалить всех людей и связи на этом телефоне. Перед очисткой сохраняется снимок в «История» (настройки разработчика). " +
-                    "Git не меняется, пока вы снова не отправите древо.",
+                "Удалить всех людей и связи на этом телефоне. Перед очисткой сохраняется снимок в «История». " +
+                    "После очистки автозагрузка из Git отключается — включите выше, когда закончите отладку.",
                 color = HdTextSecondary,
                 modifier = Modifier.padding(top = 6.dp, bottom = 10.dp),
             )
@@ -257,7 +316,13 @@ fun SettingsScreen(nav: NavHostController) {
         AlertDialog(
             onDismissRequest = { wipeStep = 0 },
             title = { Text("Подтвердите") },
-            text = { Text("После очистки можно импортировать древо заново или начать с пустого.", color = HdTextSecondary) },
+            text = {
+                Text(
+                    "После очистки Git не подтянется сам — можно собрать древо с нуля. " +
+                        "Автозагрузку из Git можно снова включить в настройках.",
+                    color = HdTextSecondary,
+                )
+            },
             confirmButton = {
                 HdPrimaryButton("Стереть", loading = wipeLoading, loadingText = "…") {
                     scope.launch {

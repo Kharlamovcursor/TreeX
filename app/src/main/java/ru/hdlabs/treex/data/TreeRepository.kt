@@ -139,7 +139,13 @@ class TreeRepository(
         var changed = false
         mutex.withLock {
             database.withTransaction {
-                val people = peopleDao.all()
+                var people = peopleDao.all()
+                while (true) {
+                    val vacant = people.find { it.vacant } ?: break
+                    purgePersonLocked(vacant, people)
+                    changed = true
+                    people = peopleDao.all()
+                }
                 val fixes = TreeIntegrity.repairParentPointers(people)
                 fixes.forEach { peopleDao.upsert(it) }
                 if (fixes.isNotEmpty()) changed = true
@@ -279,7 +285,16 @@ class TreeRepository(
             }
             }
         }
-        if (changed) schedulePush()
+        if (changed) {
+            val settings = settingsRepository.settings.first()
+            if (settings.homePersonId.isBlank() && !person.vacant) {
+                val livingCount = mutex.withLock { peopleDao.all().count { !it.vacant } }
+                if (livingCount == 1) {
+                    settingsRepository.update { it.copy(homePersonId = person.id) }
+                }
+            }
+            schedulePush()
+        }
         return changed
     }
 
@@ -536,6 +551,7 @@ class TreeRepository(
     suspend fun syncTreeFromGitIfNeeded(): RemoteRefresh = gitMutex.withLock {
         val settings = settingsRepository.settings.first()
         if (!settings.gitConfigured) return@withLock RemoteRefresh.NotConfigured
+        if (settings.pauseGitAutoSync) return@withLock RemoteRefresh.Unchanged
         val empty = mutex.withLock { readLocked().people.isEmpty() }
         pullFromGitOnLaunch(forceEmptyLocal = empty) ?: RemoteRefresh.Unchanged
     }
@@ -727,6 +743,25 @@ class TreeRepository(
         "Снимок отправлен: ${settings.githubOwner}/${settings.githubRepo}, $DEBUG_TREE_SNAPSHOT_PATH"
     }
 
+    /** Удаляет все «пустые места» (остатки после удаления карточек). */
+    suspend fun purgeAllVacantSlots(): Int {
+        var removed = 0
+        mutex.withLock {
+            database.withTransaction {
+                snapshotLocked(readLocked())
+                var people = peopleDao.all()
+                while (true) {
+                    val vacant = people.find { it.vacant } ?: break
+                    purgePersonLocked(vacant, people)
+                    removed++
+                    people = peopleDao.all()
+                }
+            }
+        }
+        if (removed > 0) schedulePush()
+        return removed
+    }
+
     /** Временная очистка: снимок в истории, затем удаляются все люди и союзы. */
     suspend fun wipeTree(): String {
         mutex.withLock {
@@ -743,8 +778,9 @@ class TreeRepository(
                 generation += 1
             }
         }
-        schedulePush()
-        return "Древо очищено. Перед очисткой сохранён снимок в «История»."
+        markerFile().delete()
+        settingsRepository.update { it.copy(pauseGitAutoSync = true, homePersonId = "") }
+        return "Древо очищено. Автозагрузка из Git отключена — включите в настройках, когда закончите отладку."
     }
 
     suspend fun remoteCommits(): List<GitHubTreeSync.RemoteCommit> {

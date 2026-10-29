@@ -3,7 +3,16 @@ package ru.hdlabs.treex.domain
 import ru.hdlabs.treex.data.local.PersonEntity
 import ru.hdlabs.treex.data.local.UnionEntity
 
-data class TreeCard(val id: String, val left: Float, val top: Float, val height: Float = TreeLayout.CARD_H)
+/** Горизонтальная точка выхода линий вверх/вниз у карточки (супруг слева — влево, справа — вправо). */
+enum class LinkSide { Left, Center, Right }
+
+data class TreeCard(
+    val id: String,
+    val left: Float,
+    val top: Float,
+    val height: Float = TreeLayout.CARD_H,
+    val linkSide: LinkSide = LinkSide.Center,
+)
 
 data class ChildGroup(val parentIds: List<String>, val childIds: List<String>, val open: Boolean = false)
 
@@ -182,11 +191,13 @@ object TreeLayout {
         val byId = people.associateBy { it.id }
         val heights = livingPeople.associate { it.id to cardHeight(it) }
         val generation = generationMap(livingPeople, livingUnions, openLinks)
+        val layoutHome = homePersonId?.takeIf { it in byId }
+            ?: livingPeople.singleOrNull()?.takeIf { livingPeople.size == 1 }?.id
         val placed = SugiyamaFamilyLayout.place(
             people = livingPeople,
             unions = livingUnions,
             openLinks = openLinks,
-            homePersonId = homePersonId?.takeIf { it in byId },
+            homePersonId = layoutHome,
             cardW = CARD_W,
             gapX = SPOUSE_GAP,
             gapY = ROW_GAP,
@@ -196,14 +207,23 @@ object TreeLayout {
         val rowHeight = livingPeople.groupBy { generation[it.id] ?: 0 }.mapValues { (_, band) ->
             band.maxOf { heights[it.id] ?: CARD_H }
         }
-        val cards = placed.map { node ->
+        var cards = placed.map { node ->
             val gen = generation[node.id] ?: 0
             TreeCard(node.id, node.left, node.top, rowHeight[gen] ?: node.height)
         }
         val placedIds = cards.map { it.id }.toSet()
+        val livingIds = livingPeople.map { it.id }.toSet()
+        cards = assignLinkSides(
+            cards,
+            livingUnions.filter { it.hasBothPartners() }.mapNotNull { u ->
+                val a = u.partnerAId ?: return@mapNotNull null
+                val b = u.partnerBId ?: return@mapNotNull null
+                if (a !in livingIds || b !in livingIds) return@mapNotNull null
+                a to b
+            },
+        )
         val childGroups = UnionEr.childGroupsByParentPairs(livingPeople, placedIds, livingUnions) +
             childGroupsFromOpenLinks(livingPeople, cards, openLinks, byId, reconciledUnions)
-        val livingIds = livingPeople.map { it.id }.toSet()
         val spouseLinks = livingUnions.filter { it.hasBothPartners() }.mapNotNull { u ->
             val a = u.partnerAId ?: return@mapNotNull null
             val b = u.partnerBId ?: return@mapNotNull null

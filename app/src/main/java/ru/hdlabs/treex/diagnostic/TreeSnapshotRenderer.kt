@@ -12,8 +12,10 @@ import android.text.StaticLayout
 import android.text.TextPaint
 import ru.hdlabs.treex.data.local.PersonEntity
 import ru.hdlabs.treex.data.local.UnionEntity
+import ru.hdlabs.treex.domain.LinkSide
 import ru.hdlabs.treex.domain.OpenLink
 import ru.hdlabs.treex.domain.TreeLayout
+import ru.hdlabs.treex.domain.TreeLinkGeometry
 import ru.hdlabs.treex.domain.TreePlacement
 import ru.hdlabs.treex.domain.fullName
 import ru.hdlabs.treex.domain.isVacantSlot
@@ -87,14 +89,24 @@ object TreeSnapshotRenderer {
             val parentRects = group.parentIds.mapNotNull { id -> rectOf(id)?.let { id to it } }
             val childRects = group.childIds.mapNotNull { id -> rectOf(id)?.let { id to it } }
             if (parentRects.isEmpty() || childRects.isEmpty()) return@forEach
-            val originX = parentRects.map { it.second.centerX() }.average().toFloat()
             val originY = parentRects.maxOf { it.second.bottom }
-            val origin = originX to originY
+            val childLeft = childRects.minOf { it.second.left }
+            val childRight = childRects.maxOf { it.second.right }
+            val originX = TreeLinkGeometry.childrenHubX(
+                childRects.map { it.second.centerX() },
+                childLeft,
+                childRight,
+            )
+            fun anchorX(parentId: String, parent: RectF): Float {
+                val side = placement.cards.find { it.id == parentId }?.linkSide ?: LinkSide.Center
+                return TreeLinkGeometry.anchorX(parent.left, cardW, side)
+            }
             parentRects.forEach { (parentId, parent) ->
                 linkPaint.color = genderColor(parentId)
+                val fromX = anchorX(parentId, parent)
                 val path = Path().apply {
-                    moveTo(parent.centerX(), parent.bottom)
-                    quadTo(parent.centerX(), originY, originX, originY)
+                    moveTo(fromX, parent.bottom)
+                    quadTo(fromX, originY, originX, originY)
                 }
                 canvas.drawPath(path, linkPaint)
             }

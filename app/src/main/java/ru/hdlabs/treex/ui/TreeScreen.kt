@@ -121,8 +121,8 @@ fun TreeScreen(nav: NavHostController, highlight: String) {
         if (landscape) actionsExpanded = false
     }
 
-    LaunchedEffect(settings.gitConfigured, state.people.size) {
-        if (settings.gitConfigured && state.people.isEmpty()) {
+    LaunchedEffect(settings.gitConfigured, settings.pauseGitAutoSync, state.people.size) {
+        if (settings.gitConfigured && !settings.pauseGitAutoSync && state.people.isEmpty()) {
             when (val result = app.container.treeRepository.syncTreeFromGitIfNeeded()) {
                 is RemoteRefresh.Updated -> updatedMessage = "Древо загружено из Git: ${result.count} чел."
                 is RemoteRefresh.Failed -> if (!NetworkHelper.looksLikeNetworkIssue(result.message)) {
@@ -178,8 +178,10 @@ fun TreeScreen(nav: NavHostController, highlight: String) {
                         app.container.treeRepository.refreshFromGit(),
                     )
                     is RemoteRefresh.LocalAhead -> {
-                        updatedMessage = if (livingCount == 0) {
+                        updatedMessage = if (livingCount == 0 && !settings.pauseGitAutoSync) {
                             appliedGitMessage(app.container.treeRepository.refreshFromGit())
+                        } else if (livingCount == 0 && settings.pauseGitAutoSync) {
+                            "Древо пустое. Автозагрузка из Git отключена (отладка)."
                         } else {
                             runCatching { app.container.treeRepository.pushNow() }
                                 .getOrElse { it.message ?: "Не удалось отправить в Git" }
@@ -190,10 +192,12 @@ fun TreeScreen(nav: NavHostController, highlight: String) {
                     )
                     is RemoteRefresh.Updated -> updatedMessage = "Информация обновлена. В древе ${result.count} чел."
                     RemoteRefresh.Unchanged -> {
-                        updatedMessage = if (state.people.isEmpty() && settings.gitConfigured) {
-                            appliedGitMessage(app.container.treeRepository.refreshFromGit())
-                        } else {
-                            "Телефон и Git уже совпадают."
+                        updatedMessage = when {
+                            settings.pauseGitAutoSync && state.people.isEmpty() ->
+                                "Древо пустое. Автозагрузка из Git отключена (отладка)."
+                            state.people.isEmpty() && settings.gitConfigured ->
+                                appliedGitMessage(app.container.treeRepository.refreshFromGit())
+                            else -> "Телефон и Git уже совпадают."
                         }
                     }
                     RemoteRefresh.NotConfigured -> updatedMessage =
@@ -273,6 +277,7 @@ fun TreeScreen(nav: NavHostController, highlight: String) {
             when {
                 state.people.isEmpty() -> EmptyTree(
                     gitConfigured = settings.gitConfigured,
+                    gitAutoSyncPaused = settings.pauseGitAutoSync,
                     onAdd = { nav.navigate(Routes.edit("new")) },
                     onLoadGit = {
                         scope.launch {
@@ -736,18 +741,29 @@ private fun TreeAction(text: String, primary: Boolean = false, onClick: () -> Un
 }
 
 @Composable
-private fun EmptyTree(gitConfigured: Boolean, onAdd: () -> Unit, onLoadGit: () -> Unit) {
+private fun EmptyTree(
+    gitConfigured: Boolean,
+    gitAutoSyncPaused: Boolean,
+    onAdd: () -> Unit,
+    onLoadGit: () -> Unit,
+) {
     Text(
-        if (gitConfigured) {
-            "Древо пустое. Загрузите его из семейного Git или добавьте первого человека вручную."
-        } else {
-            "Начните с одного человека. Потом к нему можно добавить родителей, супруга и детей отдельными кнопками."
+        when {
+            gitConfigured && gitAutoSyncPaused ->
+                "Древо пустое. Автозагрузка из Git отключена — можно собрать древо с нуля или загрузить вручную."
+            gitConfigured ->
+                "Древо пустое. Загрузите его из семейного Git или добавьте первого человека вручную."
+            else ->
+                "Начните с одного человека. Потом к нему можно добавить родителей, супруга и детей отдельными кнопками."
         },
         color = HdTextSecondary,
     )
     Spacer(Modifier.height(12.dp))
     if (gitConfigured) {
-        HdPrimaryButton("Загрузить из Git", onClick = onLoadGit)
+        HdPrimaryButton(
+            if (gitAutoSyncPaused) "Загрузить из Git вручную" else "Загрузить из Git",
+            onClick = onLoadGit,
+        )
         Spacer(Modifier.height(8.dp))
     }
     HdSecondaryButton("Добавить первого человека", onClick = onAdd)

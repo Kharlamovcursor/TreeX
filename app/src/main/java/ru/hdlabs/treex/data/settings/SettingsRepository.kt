@@ -24,6 +24,8 @@ data class AppSettings(
     val userLastName: String = "",
     val userFirstName: String = "",
     val userMiddleName: String = "",
+    /** Пока true — не подтягивать древо из Git при пустой базе и при запуске (отладка с нуля). */
+    val pauseGitAutoSync: Boolean = false,
 ) {
     val gitConfigured: Boolean
         get() = githubToken.isNotBlank() && githubOwner.isNotBlank() && githubRepo.isNotBlank()
@@ -48,6 +50,7 @@ class SettingsRepository(private val context: Context) {
     private val userLastNameKey = stringPreferencesKey("user_last_name")
     private val userFirstNameKey = stringPreferencesKey("user_first_name")
     private val userMiddleNameKey = stringPreferencesKey("user_middle_name")
+    private val pauseGitAutoSyncKey = booleanPreferencesKey("pause_git_auto_sync")
 
     val settings: Flow<AppSettings> = context.settingsStore.data.map { prefs ->
         FamilyGitConfig.resolve(
@@ -64,6 +67,7 @@ class SettingsRepository(private val context: Context) {
                 userLastName = prefs[userLastNameKey].orEmpty(),
                 userFirstName = prefs[userFirstNameKey].orEmpty(),
                 userMiddleName = prefs[userMiddleNameKey].orEmpty(),
+                pauseGitAutoSync = prefs[pauseGitAutoSyncKey] ?: false,
             ),
         )
     }
@@ -83,6 +87,7 @@ class SettingsRepository(private val context: Context) {
                 userLastName = prefs[userLastNameKey].orEmpty(),
                 userFirstName = prefs[userFirstNameKey].orEmpty(),
                 userMiddleName = prefs[userMiddleNameKey].orEmpty(),
+                pauseGitAutoSync = prefs[pauseGitAutoSyncKey] ?: false,
             )
             val next = transform(current)
             prefs[tokenKey] = next.githubToken.trim()
@@ -97,6 +102,7 @@ class SettingsRepository(private val context: Context) {
             prefs[userLastNameKey] = next.userLastName.trim()
             prefs[userFirstNameKey] = next.userFirstName.trim()
             prefs[userMiddleNameKey] = next.userMiddleName.trim()
+            prefs[pauseGitAutoSyncKey] = next.pauseGitAutoSync
         }
     }
 }
