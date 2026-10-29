@@ -5,7 +5,3 @@
 
 -keepattributes *Annotation*, Signature, InnerClasses, EnclosingMethod
 -keep class ru.hdlabs.treex.BuildConfig { *; }
-
--keepclassmembers class ru.hdlabs.treex.ui.TopolaReadyBridge {
-    @android.webkit.JavascriptInterface <methods>;
-}

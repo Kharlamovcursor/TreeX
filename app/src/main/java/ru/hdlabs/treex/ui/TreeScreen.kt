@@ -114,8 +114,6 @@ fun TreeScreen(nav: NavHostController, highlight: String) {
     var showBranchConnectModes by remember { mutableStateOf(false) }
     var pendingBranchConnect by remember { mutableStateOf<Pair<String, BranchConnectMode>?>(null) }
     var actionsExpanded by rememberSaveable { mutableStateOf(false) }
-    var gedcomForView by remember { mutableStateOf("") }
-    var topolaReload by remember { mutableIntStateOf(0) }
     val landscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
 
     LaunchedEffect(landscape) {
@@ -149,15 +147,6 @@ fun TreeScreen(nav: NavHostController, highlight: String) {
         if (focusId.isNotBlank() && focusId !in ids) {
             focusId = ""
             actionsExpanded = false
-        }
-    }
-
-    LaunchedEffect(state.people, state.unions, openLinks, centerToken) {
-        if (state.people.isEmpty()) {
-            gedcomForView = ""
-        } else {
-            gedcomForView = runCatching { app.container.treeRepository.exportGedcom() }.getOrDefault("")
-            topolaReload += 1
         }
     }
 
@@ -318,7 +307,7 @@ fun TreeScreen(nav: NavHostController, highlight: String) {
                     val subjectName = state.people.find { it.id == subjectId }?.fullName() ?: "Карточка"
                     Spacer(Modifier.height(4.dp))
                     Text(
-                        "«$subjectName»: ${branchConnectPrompt(mode)}. Найдите человека через поиск.",
+                        "«$subjectName»: ${branchConnectPrompt(mode)}. Тапните карточку на основном древе.",
                         color = HdOrange,
                     )
                     HdSecondaryButton("Отменить связывание") { pendingBranchConnect = null }
@@ -368,19 +357,72 @@ fun TreeScreen(nav: NavHostController, highlight: String) {
                     }
                 }
                 else -> {
-                    if (!landscape) {
-                        Text(
-                            "Древо: Topola Viewer (Apache-2.0, github.com/PeWu/topola-viewer)",
-                            color = HdTextSecondary,
-                            modifier = Modifier.padding(bottom = 4.dp),
-                            maxLines = 2,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    }
-                    TopolaTreeView(
-                        gedcom = gedcomForView,
-                        reloadToken = topolaReload,
+                    FamilyTree(
+                        people = state.people,
+                        unions = state.unions,
+                        openLinks = openLinks,
+                        selectedId = focusId,
+                        freshId = activeHighlight,
+                        centerToken = centerToken,
+                        pendingLinkId = pendingLinkId,
+                        detachedBranchIds = detachedBranchIds,
+                        homePersonId = settings.homePersonId,
+                        compactChrome = landscape,
                         modifier = Modifier.weight(1f),
+                        onSelect = { person ->
+                            val branchPick = pendingBranchConnect
+                            if (branchPick != null) {
+                                if (person.id == branchPick.first) {
+                                    updatedMessage = "Выберите карточку на основном древе, не эту же."
+                                    return@FamilyTree
+                                }
+                                pendingBranchConnect = null
+                                scope.launch {
+                                    runCatching {
+                                        app.container.treeRepository.connectBranchToTree(
+                                            branchPick.first,
+                                            person.id,
+                                            branchPick.second,
+                                        )
+                                    }.onSuccess {
+                                        updatedMessage = "Ветка связана с древом."
+                                        centerToken += 1
+                                    }.onFailure { error ->
+                                        updatedMessage = error.message ?: "Не удалось связать ветку"
+                                    }
+                                }
+                                return@FamilyTree
+                            }
+                            val linkId = pendingLinkId
+                            if (linkId != null) {
+                                val link = openLinks.find { it.id == linkId }
+                                if (link != null && link.slot in setOf("father", "mother") && !acceptsAsParent(link.slot, person)) {
+                                    updatedMessage = if (link.slot == "father") {
+                                        "Для отца выберите мужскую карточку."
+                                    } else {
+                                        "Для матери выберите женскую карточку."
+                                    }
+                                    return@FamilyTree
+                                }
+                                pendingLinkId = null
+                                scope.launch {
+                                    runCatching {
+                                        app.container.treeRepository.attachOpenLink(linkId, person.id)
+                                    }.onFailure { error ->
+                                        updatedMessage = error.message ?: "Не удалось прикрепить связь"
+                                    }
+                                }
+                                if (person.isVacantSlot()) {
+                                    nav.navigate(Routes.edit(person.id))
+                                }
+                            } else {
+                                focusId = person.id
+                                actionsExpanded = false
+                                centerToken += 1
+                            }
+                        },
+                        onOpenDetail = { nav.navigate(Routes.person(it.id)) },
+                        onHoldLink = { pendingLinkId = it },
                     )
                     if (focus != null && !landscape) {
                         if (actionsExpanded) {
@@ -470,7 +512,7 @@ fun TreeScreen(nav: NavHostController, highlight: String) {
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(
-                        "Карточка «${focus.fullName()}» сейчас на отдельной ветке. Выберите роль, затем найдите человека через поиск.",
+                        "Карточка «${focus.fullName()}» сейчас на отдельной ветке. Выберите, кем она приходится человеку на основном древе, затем тапните его карточку.",
                         color = HdTextSecondary,
                     )
                     BranchConnectMode.entries.forEach { mode ->
