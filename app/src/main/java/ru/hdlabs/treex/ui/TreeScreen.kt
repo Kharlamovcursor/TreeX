@@ -357,7 +357,7 @@ fun TreeScreen(nav: NavHostController, highlight: String) {
                     }
                 }
                 else -> {
-                    FamilyTree(
+                    RelativesTreeView(
                         people = state.people,
                         unions = state.unions,
                         openLinks = openLinks,
@@ -374,7 +374,7 @@ fun TreeScreen(nav: NavHostController, highlight: String) {
                             if (branchPick != null) {
                                 if (person.id == branchPick.first) {
                                     updatedMessage = "Выберите карточку на основном древе, не эту же."
-                                    return@FamilyTree
+                                    return@RelativesTreeView
                                 }
                                 pendingBranchConnect = null
                                 scope.launch {
@@ -391,7 +391,7 @@ fun TreeScreen(nav: NavHostController, highlight: String) {
                                         updatedMessage = error.message ?: "Не удалось связать ветку"
                                     }
                                 }
-                                return@FamilyTree
+                                return@RelativesTreeView
                             }
                             val linkId = pendingLinkId
                             if (linkId != null) {
@@ -402,7 +402,7 @@ fun TreeScreen(nav: NavHostController, highlight: String) {
                                     } else {
                                         "Для матери выберите женскую карточку."
                                     }
-                                    return@FamilyTree
+                                    return@RelativesTreeView
                                 }
                                 pendingLinkId = null
                                 scope.launch {
