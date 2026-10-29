@@ -38,10 +38,7 @@ object UnionEr {
     fun findParentUnionForChild(unions: List<UnionEntity>, childId: String): UnionEntity? =
         unions.find { childId in it.childIdsList() }
 
-    /**
-     * Родители ребёнка: сначала поля fatherId/motherId (источник истины в базе),
-     * иначе партнёры союза, где ребёнок в childrenIds.
-     */
+    /** Родители ребёнка: партнёры союза, где ребёнок в childrenIds. */
     fun parentIdsOf(
         person: PersonEntity,
         ids: Set<String>,
@@ -55,12 +52,6 @@ object UnionEr {
             .distinct()
         if (fromUnions.isNotEmpty()) {
             return (fromUnions + extraParents[person.id].orEmpty().filter { it in ids }).distinct()
-        }
-        val legacy = listOfNotNull(person.fatherId, person.motherId)
-            .filter { it in ids && it != person.id }
-            .distinct()
-        if (legacy.isNotEmpty()) {
-            return (legacy + extraParents[person.id].orEmpty().filter { it in ids }).distinct()
         }
         return extraParents[person.id].orEmpty().filter { it in ids && it != person.id }.distinct()
     }
@@ -91,17 +82,11 @@ object UnionEr {
         val parentingByKey = LinkedHashMap<String, UnionEntity>()
 
         living.forEach { child ->
-            var parents = listOfNotNull(
-                child.fatherId?.takeIf { it in ids },
-                child.motherId?.takeIf { it in ids },
-            ).distinct()
-            if (parents.isEmpty()) {
-                parents = existing
-                    .filter { child.id in it.childIdsList() }
-                    .flatMap { it.partnerIds() }
-                    .filter { it in ids }
-                    .distinct()
-            }
+            var parents = existing
+                .filter { child.id in it.childIdsList() }
+                .flatMap { it.partnerIds() }
+                .filter { it in ids }
+                .distinct()
             when (parents.size) {
                 2 -> {
                     val a = minOf(parents[0], parents[1])

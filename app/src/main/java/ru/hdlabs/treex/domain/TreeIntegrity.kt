@@ -37,19 +37,6 @@ object TreeIntegrity {
         UnionEr.parentIdsOf(person, living, unions)
             .filter { it in living && isLiving(byId.getValue(it)) }
 
-    /** Clears parent pointers that point at vacant or missing people. */
-    fun repairParentPointers(people: List<PersonEntity>): List<PersonEntity> {
-        val living = livingIds(people)
-        return people.mapNotNull { person ->
-            if (!isLiving(person)) return@mapNotNull null
-            val father = person.fatherId?.takeIf { it in living }
-            val mother = person.motherId?.takeIf { it in living }
-            if (father == person.fatherId && mother == person.motherId) return@mapNotNull null
-            person.copy(
-                fatherId = father,
-                motherId = mother,
-                updatedAtMillis = System.currentTimeMillis(),
-            )
-        }
-    }
+    /** No-op: parent links live in families since schema v6. */
+    fun repairParentPointers(people: List<PersonEntity>): List<PersonEntity> = emptyList()
 }

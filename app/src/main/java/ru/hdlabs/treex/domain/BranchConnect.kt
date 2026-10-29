@@ -24,6 +24,11 @@ data class BranchConnectPlan(
     val unionPartners: Pair<String, String>?,
 )
 
+private fun parentPair(unions: List<UnionEntity>, childId: String): Pair<String?, String?> {
+    val union = unions.find { childId in it.childIdsList() } ?: return null to null
+    return union.partnerAId to union.partnerBId
+}
+
 fun planBranchConnect(
     subject: PersonEntity,
     target: PersonEntity,
@@ -34,16 +39,6 @@ fun planBranchConnect(
 ): BranchConnectPlan {
     require(subject.id != target.id) { "Нельзя связать карточку с самой собой" }
     require(!subject.vacant && !target.vacant) { "Пустые места нельзя связывать с древом" }
-    val parents = people.associate { it.id to (it.fatherId to it.motherId) }.toMutableMap()
-    val updates = mutableListOf<PersonEntity>()
-    fun write(person: PersonEntity, fatherId: String?, motherId: String?) {
-        if (TreeRules.createsCycle(parents, person.id, fatherId, motherId)) {
-            throw IllegalArgumentException("Такая связь замыкает круг в древе")
-        }
-        val next = person.copy(fatherId = fatherId, motherId = motherId, updatedAtMillis = nowMillis)
-        parents[person.id] = fatherId to motherId
-        updates += next
-    }
     var union: Pair<String, String>? = null
     when (mode) {
         BranchConnectMode.SPOUSE -> {
@@ -57,30 +52,34 @@ fun planBranchConnect(
             if (!acceptsAsParent("father", subject)) {
                 throw IllegalArgumentException("Для отца нужна мужская карточка")
             }
-            if (target.fatherId != null) throw IllegalArgumentException("У выбранного человека уже указан отец")
-            write(target, subject.id, target.motherId)
+            if (parentPair(unions, target.id).first != null) {
+                throw IllegalArgumentException("У выбранного человека уже указан отец")
+            }
         }
         BranchConnectMode.SUBJECT_AS_MOTHER -> {
             if (!acceptsAsParent("mother", subject)) {
                 throw IllegalArgumentException("Для матери нужна женская карточка")
             }
-            if (target.motherId != null) throw IllegalArgumentException("У выбранного человека уже указана мать")
-            write(target, target.fatherId, subject.id)
+            if (parentPair(unions, target.id).second != null) {
+                throw IllegalArgumentException("У выбранного человека уже указана мать")
+            }
         }
         BranchConnectMode.TARGET_AS_FATHER -> {
             if (!acceptsAsParent("father", target)) {
                 throw IllegalArgumentException("Для отца нужна мужская карточка")
             }
-            if (subject.fatherId != null) throw IllegalArgumentException("У этой карточки уже указан отец")
-            write(subject, target.id, subject.motherId)
+            if (parentPair(unions, subject.id).first != null) {
+                throw IllegalArgumentException("У этой карточки уже указан отец")
+            }
         }
         BranchConnectMode.TARGET_AS_MOTHER -> {
             if (!acceptsAsParent("mother", target)) {
                 throw IllegalArgumentException("Для матери нужна женская карточка")
             }
-            if (subject.motherId != null) throw IllegalArgumentException("У этой карточки уже указана мать")
-            write(subject, subject.fatherId, target.id)
+            if (parentPair(unions, subject.id).second != null) {
+                throw IllegalArgumentException("У этой карточки уже указана мать")
+            }
         }
     }
-    return BranchConnectPlan(updates.distinctBy { it.id }, union)
+    return BranchConnectPlan(emptyList(), union)
 }

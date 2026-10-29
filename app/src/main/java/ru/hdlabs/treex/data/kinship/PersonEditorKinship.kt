@@ -38,6 +38,9 @@ internal suspend fun persistPersonEditor(
     baselineSpouseIds: List<String>,
     baselineFatherId: String?,
     baselineMotherId: String?,
+    uiFatherId: String?,
+    uiMotherId: String?,
+    coParentIdForChildAttach: String?,
     snapshot: Boolean,
 ): Boolean = withContext(NonCancellable) {
     val merged = if (previous != null && preserveUntouched) mergePerson(previous, draft, touched) else draft
@@ -46,8 +49,6 @@ internal suspend fun persistPersonEditor(
         birthLastName = if (merged.gender == "f") capitalizePersonName(merged.birthLastName) else "",
         firstName = capitalizePersonName(merged.firstName),
         middleName = capitalizePersonName(merged.middleName),
-        fatherId = null,
-        motherId = null,
         gender = if (merged.gender == "m" || merged.gender == "f") merged.gender else "u",
         updatedAtMillis = System.currentTimeMillis(),
     )
@@ -64,8 +65,7 @@ internal suspend fun persistPersonEditor(
                 changed = true
             }
             "child" -> {
-                val coParent = listOfNotNull(merged.fatherId, merged.motherId)
-                    .firstOrNull { it.isNotBlank() && it != attach.anchorId }
+                val coParent = coParentIdForChildAttach?.takeIf { it.isNotBlank() && it != attach.anchorId }
                 kinship.addChildFromEditor(attach.anchorId, clean, coParent).requireSuccess()
                 changed = true
             }
@@ -107,7 +107,7 @@ internal suspend fun persistPersonEditor(
             }
         }
         if ("father" in touched) {
-            val next = draft.fatherId?.takeIf { it.isNotBlank() }
+            val next = uiFatherId?.takeIf { it.isNotBlank() }
             if (baselineFatherId != null && baselineFatherId != next) {
                 kinship.detachParent(clean.id, baselineFatherId).requireSuccess()
             }
@@ -116,7 +116,7 @@ internal suspend fun persistPersonEditor(
             }
         }
         if ("mother" in touched) {
-            val next = draft.motherId?.takeIf { it.isNotBlank() }
+            val next = uiMotherId?.takeIf { it.isNotBlank() }
             if (baselineMotherId != null && baselineMotherId != next) {
                 kinship.detachParent(clean.id, baselineMotherId).requireSuccess()
             }

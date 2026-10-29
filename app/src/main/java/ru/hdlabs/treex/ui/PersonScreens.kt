@@ -149,8 +149,6 @@ fun PersonEditorScreen(routeId: String, role: String, anchor: String, nav: NavHo
         phone = phone.trim(),
         photoFile = photoFile,
         notes = notes.trim(),
-        fatherId = fatherId.ifBlank { null },
-        motherId = motherId.ifBlank { null },
         createdAtMillis = createdAt,
     )
     val hasName = draft.lastName.isNotBlank() || draft.firstName.isNotBlank() || draft.middleName.isNotBlank()
@@ -184,6 +182,15 @@ fun PersonEditorScreen(routeId: String, role: String, anchor: String, nav: NavHo
                     baselineSpouseIds = baselineSpouseIds,
                     baselineFatherId = baselineFatherId.ifBlank { null },
                     baselineMotherId = baselineMotherId.ifBlank { null },
+                    uiFatherId = fatherId.ifBlank { null },
+                    uiMotherId = motherId.ifBlank { null },
+                    coParentIdForChildAttach = when (buffer.attach?.role) {
+                        "child" -> listOfNotNull(
+                            fatherId.ifBlank { null },
+                            motherId.ifBlank { null },
+                        ).firstOrNull { it != buffer.attach?.anchorId }
+                        else -> null
+                    },
                     snapshot = snapshot,
                 )
                 if (buffer.epoch == epoch) return@withLock
@@ -707,7 +714,7 @@ fun PersonDetailScreen(personId: String, nav: NavHostController) {
                         "Сводный родственник",
                         half,
                         nav,
-                        ", ${halfSiblingCaption(person, half)}",
+                        ", ${halfSiblingCaption(person, half, tree.unions, tree.people)}",
                     )
                 }
             }

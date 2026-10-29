@@ -11,29 +11,9 @@ fun suggestedParentFamilyName(host: PersonEntity): String = when (host.gender) {
 }
 
 @Deprecated("Use families graph", level = DeprecationLevel.WARNING)
-fun parentCouplePairs(people: List<PersonEntity>): List<Pair<String, String>> =
-    people.mapNotNull { person ->
-        val fatherId = person.fatherId ?: return@mapNotNull null
-        val motherId = person.motherId ?: return@mapNotNull null
-        if (fatherId == motherId) return@mapNotNull null
-        minOf(fatherId, motherId) to maxOf(fatherId, motherId)
-    }.distinct()
+fun parentCouplePairs(people: List<PersonEntity>): List<Pair<String, String>> = emptyList()
 
 fun mergeInferredParentUnions(
     existing: List<UnionEntity>,
     people: List<PersonEntity>,
-): List<UnionEntity> {
-    val known = existing.mapNotNull { union ->
-        val a = union.partnerAId ?: return@mapNotNull null
-        val b = union.partnerBId ?: return@mapNotNull null
-        minOf(a, b) to maxOf(a, b)
-    }.toSet()
-    val ids = people.map { it.id }.toSet()
-    val added = parentCouplePairs(people).mapNotNull { (a, b) ->
-        if (a !in ids || b !in ids) return@mapNotNull null
-        if (a to b in known) return@mapNotNull null
-        UnionEntity(stableUnionId(a, b), a, b)
-    }
-    val merged = if (added.isEmpty()) existing else (existing + added).distinctBy { it.id }
-    return UnionEr.reconcileChildMembership(people, merged)
-}
+): List<UnionEntity> = UnionEr.reconcileChildMembership(people, existing)

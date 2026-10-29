@@ -11,8 +11,9 @@ class OpenLinkTest {
     fun spouseAndOtherParentStayWhenOneParentIsRemoved() {
         val father = PersonEntity(id = "f", gender = "m")
         val mother = PersonEntity(id = "m", gender = "f")
-        val child = PersonEntity(id = "c", fatherId = "f", motherId = "m")
-        val links = linksAfterRemoval(father, listOf(father, mother, child), listOf(UnionEntity("u", "f", "m")))
+        val child = PersonEntity(id = "c")
+        val unions = listOf(UnionEntity("u", "f", "m", childIds = "c"))
+        val links = linksAfterRemoval(father, listOf(father, mother, child), unions)
         assertTrue(links.any { it.slot == "spouse" && it.ownerId == "m" })
         assertTrue(links.any { it.slot == "father" && it.ownerId == "c" && it.anchorId == "m" })
         assertTrue(links.none { it.slot == "bridge" })
@@ -21,22 +22,24 @@ class OpenLinkTest {
     @Test
     fun intermediateParentLeavesABridgeUnderTheGrandparent() {
         val grand = PersonEntity(id = "g", gender = "m")
-        val middle = PersonEntity(id = "f", gender = "m", fatherId = "g")
-        val child = PersonEntity(id = "c", fatherId = "f")
-        val bridge = linksAfterRemoval(middle, listOf(grand, middle, child), emptyList()).single { it.slot == "bridge" }
+        val middle = PersonEntity(id = "f", gender = "m")
+        val child = PersonEntity(id = "c")
+        val unions = listOf(
+            UnionEntity("u1", "g", null, childIds = "f"),
+            UnionEntity("u2", "f", null, childIds = "c"),
+        )
+        val bridge = linksAfterRemoval(middle, listOf(grand, middle, child), unions).single { it.slot == "bridge" }
         assertEquals("g", bridge.anchorId)
         assertEquals(listOf("c"), bridge.childIds)
         assertTrue(bridge.anchorIsParent)
     }
 
     @Test
-    fun bridgeAttachesTheChosenPersonAsTheNewParent() {
+    fun reattachPeopleIsHandledByKinshipInRepository() {
         val grand = PersonEntity(id = "g", gender = "m")
         val aunt = PersonEntity(id = "a", gender = "f")
         val child = PersonEntity(id = "c")
         val link = OpenLink("k", "bridge", "g", "g", listOf("c"), anchorIsParent = true)
-        val updates = reattachPeople(link, aunt, listOf(grand, aunt, child)).associateBy { it.id }
-        assertEquals("g", updates.getValue("a").fatherId)
-        assertEquals("a", updates.getValue("c").motherId)
+        assertTrue(reattachPeople(link, aunt, listOf(grand, aunt, child)).isEmpty())
     }
 }

@@ -12,16 +12,14 @@ import androidx.room.RoomDatabase
 @Database(
     entities = [
         PersonEntity::class,
-        UnionEntity::class,
         FamilyEntity::class,
         FamilyChildEntity::class,
     ],
-    version = 5,
+    version = 6,
     exportSchema = true,
 )
 abstract class AppDatabase : RoomDatabase() {
     abstract fun personDao(): PersonDao
-    abstract fun unionDao(): UnionDao
     abstract fun familyDao(): FamilyDao
     abstract fun familyChildDao(): FamilyChildDao
 
@@ -41,6 +39,7 @@ abstract class AppDatabase : RoomDatabase() {
                         DatabaseMigrations.MIGRATION_2_3,
                         DatabaseMigrations.MIGRATION_3_4,
                         DatabaseMigrations.MIGRATION_4_5,
+                        DatabaseMigrations.MIGRATION_5_6,
                     )
                     .build()
                     .also { instance = it }

@@ -14,7 +14,7 @@ class KinshipAcceptanceTest {
         val h = PersonEntity(id = "h", gender = "m", birthDate = "1980-01-01")
         val w = PersonEntity(id = "w", gender = "f", birthDate = "1981-01-01")
         val kids = (1..4).map { i ->
-            PersonEntity(id = "c$i", gender = "m", birthDate = "20${10 + i}-01-01", fatherId = "h", motherId = "w")
+            PersonEntity(id = "c$i", gender = "m", birthDate = "20${10 + i}-01-01")
         }
         val people = listOf(h, w) + kids
         val unions = listOf(UnionEntity("u", "h", "w", childIds = kids.joinToString(",") { it.id }))
@@ -31,7 +31,7 @@ class KinshipAcceptanceTest {
     @Test
     fun scenario2_singleKnownParent() {
         val f = PersonEntity(id = "f", gender = "m", birthDate = "1970-01-01")
-        val c = PersonEntity(id = "c", gender = "m", birthDate = "2000-01-01", fatherId = "f")
+        val c = PersonEntity(id = "c", gender = "m", birthDate = "2000-01-01")
         val unions = listOf(UnionEntity("pu-f", "f", null, childIds = "c"))
         assertTrue(unions.any { "c" in it.childIdsList() && "f" in it.partnerIds() })
         val parents = UnionEr.parentIdsOf(c, setOf("f", "c"), UnionEr.compactUnions(listOf(f, c), unions))
@@ -43,8 +43,8 @@ class KinshipAcceptanceTest {
         val h = PersonEntity(id = "h", gender = "m", birthDate = "1970-01-01")
         val w1 = PersonEntity(id = "w1", gender = "f", birthDate = "1972-01-01")
         val w2 = PersonEntity(id = "w2", gender = "f", birthDate = "1975-01-01")
-        val c1 = PersonEntity(id = "c1", gender = "m", birthDate = "1995-01-01", fatherId = "h", motherId = "w1")
-        val c2 = PersonEntity(id = "c2", gender = "f", birthDate = "2010-01-01", fatherId = "h", motherId = "w2")
+        val c1 = PersonEntity(id = "c1", gender = "m", birthDate = "1995-01-01")
+        val c2 = PersonEntity(id = "c2", gender = "f", birthDate = "2010-01-01")
         val people = listOf(h, w1, w2, c1, c2)
         val unions = listOf(
             UnionEntity("u1", "h", "w1", childIds = "c1"),
@@ -103,10 +103,13 @@ class KinshipAcceptanceTest {
         val people = listOf(
             PersonEntity(id = "gf", gender = "m", birthDate = "1940-01-01"),
             PersonEntity(id = "gm", gender = "f", birthDate = "1942-01-01"),
-            PersonEntity(id = "f", gender = "m", birthDate = "1965-01-01", fatherId = "gf", motherId = "gm"),
-            PersonEntity(id = "c", gender = "m", birthDate = "1990-01-01", fatherId = "f"),
+            PersonEntity(id = "f", gender = "m", birthDate = "1965-01-01"),
+            PersonEntity(id = "c", gender = "m", birthDate = "1990-01-01"),
         )
-        val unions = listOf(UnionEntity("1", "gf", "gm"), UnionEntity("pu-f", "f", null, childIds = "c"))
+        val unions = listOf(
+            UnionEntity("1", "gf", "gm", childIds = "f"),
+            UnionEntity("pu-f", "f", null, childIds = "c"),
+        )
         val ids = people.map { it.id }.toSet()
         val compact = UnionEr.compactUnions(people, unions)
         assertTrue(UnionEr.parentIdsOf(people.single { it.id == "c" }, ids, compact).contains("f"))
@@ -119,7 +122,7 @@ class KinshipAcceptanceTest {
     fun scenario9_manyChildrenAndBranches() {
         val f = PersonEntity(id = "f", gender = "m")
         val m = PersonEntity(id = "m", gender = "f")
-        val kids = (1..8).map { i -> PersonEntity(id = "k$i", fatherId = "f", motherId = "m") }
+        val kids = (1..8).map { i -> PersonEntity(id = "k$i") }
         val unions = listOf(UnionEntity("u", "f", "m", childIds = kids.joinToString(",") { it.id }))
         assertEquals(8, unions.single().childIdsList().size)
     }

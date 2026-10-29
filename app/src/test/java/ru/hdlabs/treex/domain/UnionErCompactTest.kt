@@ -12,7 +12,7 @@ class UnionErCompactTest {
         val people = listOf(
             PersonEntity(id = "f", gender = "m"),
             PersonEntity(id = "m", gender = "f"),
-            PersonEntity(id = "c", gender = "m", fatherId = "f", motherId = "m"),
+            PersonEntity(id = "c", gender = "m"),
         )
         val messy = listOf(
             UnionEntity(id = "u-f-m", partnerAId = "f", partnerBId = "m", childIds = "c"),
@@ -27,11 +27,11 @@ class UnionErCompactTest {
     }
 
     @Test
-    fun parentIdsPreferUnionsOverLegacyFields() {
+    fun parentIdsFromUnionChildMembership() {
         val people = listOf(
             PersonEntity(id = "f", gender = "m"),
             PersonEntity(id = "m", gender = "f"),
-            PersonEntity(id = "c", gender = "m", fatherId = "f", motherId = "m"),
+            PersonEntity(id = "c", gender = "m"),
         )
         val wrongUnion = listOf(
             UnionEntity(id = "pu-x", partnerAId = "m", childIds = "c"),
@@ -45,8 +45,8 @@ class UnionErCompactTest {
         val people = listOf(
             PersonEntity(id = "f", gender = "m", birthDate = "1970-01-01"),
             PersonEntity(id = "m", gender = "f", birthDate = "1972-01-01"),
-            PersonEntity(id = "a", gender = "m", birthDate = "1995-01-01", fatherId = "f", motherId = "m"),
-            PersonEntity(id = "b", gender = "f", birthDate = "1998-01-01", fatherId = "f", motherId = "m"),
+            PersonEntity(id = "a", gender = "m", birthDate = "1995-01-01"),
+            PersonEntity(id = "b", gender = "f", birthDate = "1998-01-01"),
         )
         val unions = listOf(UnionEntity("u", "f", "m", childIds = "a,b"))
         val compact = UnionEr.compactUnions(people, unions)

@@ -22,4 +22,7 @@ interface FamilyChildDao {
 
     @Query("DELETE FROM family_children WHERE familyId = :familyId")
     suspend fun deleteByFamily(familyId: String)
+
+    @Query("DELETE FROM family_children")
+    suspend fun deleteAll()
 }

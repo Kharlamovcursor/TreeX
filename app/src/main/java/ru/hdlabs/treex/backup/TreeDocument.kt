@@ -8,7 +8,10 @@ data class TreeDocument(
     val version: Int = VERSION,
     val exportedAtMillis: Long = 0L,
     val people: List<PersonRecord> = emptyList(),
+    /** Wire-format projection of [families] for backward compatibility; not source of truth since Room v6. */
     val unions: List<UnionRecord> = emptyList(),
+    /** Canonical kinship hub list when present in JSON; preferred over [unions] on import. */
+    val families: List<FamilyRecord> = emptyList(),
 ) {
     companion object {
         const val FORMAT = "hdlabs-tree"
@@ -36,6 +39,16 @@ data class PersonRecord(
     val vacant: Boolean = false,
     val createdAtMillis: Long = 0L,
     val updatedAtMillis: Long = 0L,
+)
+
+@Serializable
+data class FamilyRecord(
+    val id: String,
+    val partnerAId: String? = null,
+    val partnerBId: String? = null,
+    val marriedOn: String? = null,
+    val unionType: String? = null,
+    val childIds: List<String> = emptyList(),
 )
 
 @Serializable

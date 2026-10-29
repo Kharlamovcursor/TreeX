@@ -89,27 +89,6 @@ object GenealogyGraphMapper {
             )
         }
 
-        living.forEach { child ->
-            val alreadyInFamily = familyMap.values.any { child.id in it.childrenIds }
-            if (alreadyInFamily) return@forEach
-            val father = child.fatherId?.takeIf { it in ids && it != child.id }
-            val mother = child.motherId?.takeIf { it in ids && it != child.id }
-            if (father == null && mother == null) return@forEach
-            val legacyId = legacyFamilyId(child.id)
-            legacyFamilyIds.add(legacyId)
-            AppEventLog.info(LOG_TAG, "Synthetic legacy family $legacyId for child ${child.id}")
-            familyMap[legacyId] = Family(
-                id = legacyId,
-                partnerAId = father,
-                partnerBId = mother,
-                childrenIds = listOf(child.id),
-            )
-        }
-
-        if (legacyFamilyIds.isNotEmpty()) {
-            AppEventLog.info(LOG_TAG, "Legacy families: ${legacyFamilyIds.size}")
-        }
-
         return GenealogyGraph(persons = personMap, families = familyMap)
     }
 

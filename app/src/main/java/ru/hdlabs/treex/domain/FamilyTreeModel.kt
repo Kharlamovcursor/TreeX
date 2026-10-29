@@ -78,8 +78,6 @@ fun FamilyPerson.toPersonEntity(
     phone = previous?.phone.orEmpty(),
     photoFile = previous?.photoFile.orEmpty(),
     notes = previous?.notes.orEmpty(),
-    fatherId = previous?.fatherId,
-    motherId = previous?.motherId,
     vacant = previous?.vacant ?: false,
     createdAtMillis = previous?.createdAtMillis ?: 0L,
     updatedAtMillis = previous?.updatedAtMillis ?: 0L,

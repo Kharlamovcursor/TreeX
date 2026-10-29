@@ -51,6 +51,56 @@ object DatabaseMigrations {
         }
     }
 
+    val MIGRATION_5_6 = object : Migration(5, 6) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            migrate5To6(db)
+        }
+    }
+
+    internal fun migrate5To6(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE families ADD COLUMN marriedOn TEXT")
+        db.execSQL("ALTER TABLE families ADD COLUMN unionType TEXT")
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS people_new (
+                id TEXT NOT NULL PRIMARY KEY,
+                lastName TEXT NOT NULL,
+                birthLastName TEXT NOT NULL,
+                firstName TEXT NOT NULL,
+                middleName TEXT NOT NULL,
+                gender TEXT NOT NULL,
+                birthDate TEXT NOT NULL,
+                deathDate TEXT NOT NULL,
+                birthPlace TEXT NOT NULL,
+                email TEXT NOT NULL,
+                phone TEXT NOT NULL,
+                photoFile TEXT NOT NULL,
+                notes TEXT NOT NULL,
+                vacant INTEGER NOT NULL,
+                createdAtMillis INTEGER NOT NULL,
+                updatedAtMillis INTEGER NOT NULL
+            )
+            """.trimIndent(),
+        )
+        db.execSQL(
+            """
+            INSERT INTO people_new (
+                id, lastName, birthLastName, firstName, middleName, gender,
+                birthDate, deathDate, birthPlace, email, phone, photoFile, notes,
+                vacant, createdAtMillis, updatedAtMillis
+            )
+            SELECT
+                id, lastName, birthLastName, firstName, middleName, gender,
+                birthDate, deathDate, birthPlace, email, phone, photoFile, notes,
+                vacant, createdAtMillis, updatedAtMillis
+            FROM people
+            """.trimIndent(),
+        )
+        db.execSQL("DROP TABLE people")
+        db.execSQL("ALTER TABLE people_new RENAME TO people")
+        db.execSQL("DROP TABLE IF EXISTS unions")
+    }
+
     internal fun migrate4To5(db: SupportSQLiteDatabase) {
         db.execSQL(
             """

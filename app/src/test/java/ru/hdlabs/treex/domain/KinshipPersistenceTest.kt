@@ -37,15 +37,15 @@ class KinshipPersistenceTest {
 
     @Test
     fun editorParentPickOnChild() {
-        val self = PersonEntity(id = "s", gender = "m", firstName = "Son", fatherId = "f")
+        val self = PersonEntity(id = "s", gender = "m", firstName = "Son")
         val father = PersonEntity(id = "f", gender = "m", firstName = "Dad")
         val unions = KinshipPersistence.rebuildUnions(
             people = listOf(self, father),
             existingUnions = emptyList(),
-            focusPersonId = "s",
+            focusPersonId = "f",
             spouseDrafts = emptyList(),
-            attach = null,
-            focusPerson = self,
+            attach = RelativeAttach("s", "father"),
+            focusPerson = father,
         )
         assertTrue(unions.any { "s" in it.childIdsList() && "f" in it.partnerIds() })
     }

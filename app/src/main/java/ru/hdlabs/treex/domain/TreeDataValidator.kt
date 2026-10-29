@@ -21,25 +21,6 @@ object TreeDataValidator {
         val byId = people.associateBy { it.id }
         val compact = UnionEr.compactUnions(people, unions)
 
-        living.forEach { person ->
-            listOfNotNull(person.fatherId, person.motherId).forEach { ref ->
-                if (ref !in ids) {
-                    issues += DataIssue(
-                        "missing_ref",
-                        "У «${person.fullName()}» указан родитель $ref, которого нет в древе.",
-                        personIds = listOf(person.id, ref),
-                    )
-                }
-                if (ref == person.id) {
-                    issues += DataIssue(
-                        "self_parent",
-                        "«${person.fullName()}» не может быть родителем сам себе.",
-                        personIds = listOf(person.id),
-                    )
-                }
-            }
-        }
-
         unions.forEach { union ->
             union.partnerIds().forEach { id ->
                 if (id !in ids) {
@@ -77,21 +58,10 @@ object TreeDataValidator {
 
         living.forEach { person ->
             val parents = UnionEr.parentIdsOf(person, ids, compact)
-            if (person.fatherId != null && person.motherId != null &&
-                person.fatherId == person.motherId
-            ) {
+            if (parents.size >= 2 && parents.distinct().size == 1) {
                 issues += DataIssue(
                     "duplicate_parent",
                     "У «${person.fullName()}» отец и мать — одно лицо.",
-                    personIds = listOf(person.id),
-                )
-            }
-            val unionParents = parents.sorted()
-            val legacy = listOfNotNull(person.fatherId, person.motherId).sorted()
-            if (unionParents.isNotEmpty() && legacy.isNotEmpty() && unionParents != legacy) {
-                issues += DataIssue(
-                    "parent_mismatch",
-                    "У «${person.fullName()}» родители в карточке ($legacy) не совпадают с союзами ($unionParents).",
                     personIds = listOf(person.id),
                 )
             }

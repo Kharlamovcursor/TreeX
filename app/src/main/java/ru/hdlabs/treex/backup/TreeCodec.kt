@@ -122,11 +122,27 @@ object TreeCodec {
             )
         }
         val allUnions = (unions + inferred).sortedBy { it.id }
+        val familyRecords = doc.families
+            .sortedBy { it.id }
+            .mapNotNull { family ->
+                val a = family.partnerAId?.takeIf { it in ids }
+                val b = family.partnerBId?.takeIf { it in ids }
+                if (a == null && b == null) return@mapNotNull null
+                FamilyRecord(
+                    id = family.id,
+                    partnerAId = a,
+                    partnerBId = b,
+                    marriedOn = family.marriedOn?.takeIf { it.isNotBlank() },
+                    unionType = family.unionType?.takeIf { it.isNotBlank() },
+                    childIds = family.childIds.filter { it in ids }.distinct(),
+                )
+            }
         return doc.copy(
             format = TreeDocument.FORMAT,
             version = TreeDocument.VERSION,
             people = people,
             unions = allUnions,
+            families = familyRecords,
         )
     }
 

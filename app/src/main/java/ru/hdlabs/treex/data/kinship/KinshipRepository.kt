@@ -431,7 +431,5 @@ class KinshipRepository(
         birthLastName = capitalizePersonName(entity.birthLastName),
         firstName = capitalizePersonName(entity.firstName),
         middleName = capitalizePersonName(entity.middleName),
-        fatherId = null,
-        motherId = null,
     )
 }

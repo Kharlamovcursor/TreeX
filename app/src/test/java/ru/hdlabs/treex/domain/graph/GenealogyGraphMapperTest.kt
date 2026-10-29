@@ -25,15 +25,15 @@ class GenealogyGraphMapperTest {
     }
 
     @Test
-    fun legacyParentsWithoutUnionCreatesSyntheticFamily() {
+    fun unionWithChildMapsToFamily() {
         val people = listOf(
             PersonEntity(id = "f", gender = "m", firstName = "Dad"),
             PersonEntity(id = "m", gender = "f", firstName = "Mom"),
-            PersonEntity(id = "c", gender = "m", firstName = "Son", fatherId = "f", motherId = "m"),
+            PersonEntity(id = "c", gender = "m", firstName = "Son"),
         )
-        val graph = GenealogyGraphMapper.fromEntities(people, emptyList())
-        val legacyId = GenealogyGraphMapper.legacyFamilyId("c")
-        assertEquals(legacyId, graph.familyWhereChild("c")?.id)
+        val unions = listOf(UnionEntity("fam-1", "f", "m", childIds = "c"))
+        val graph = GenealogyGraphMapper.fromEntities(people, unions)
+        assertEquals("fam-1", graph.familyWhereChild("c")?.id)
         assertEquals(setOf("f", "m"), graph.parentsOf("c").map { it.id }.toSet())
     }
 
