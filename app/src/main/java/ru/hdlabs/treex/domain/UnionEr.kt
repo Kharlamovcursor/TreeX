@@ -40,12 +40,6 @@ object UnionEr {
         unions: List<UnionEntity>,
         extraParents: Map<String, List<String>> = emptyMap(),
     ): List<String> {
-        val legacy = listOfNotNull(person.fatherId, person.motherId)
-            .filter { it in ids && it != person.id }
-            .distinct()
-        if (legacy.isNotEmpty()) {
-            return (legacy + extraParents[person.id].orEmpty().filter { it in ids }).distinct()
-        }
         val fromUnions = unions
             .filter { person.id in it.childIdsList() }
             .flatMap { it.partnerIds() }
@@ -53,6 +47,12 @@ object UnionEr {
             .distinct()
         if (fromUnions.isNotEmpty()) {
             return (fromUnions + extraParents[person.id].orEmpty().filter { it in ids }).distinct()
+        }
+        val legacy = listOfNotNull(person.fatherId, person.motherId)
+            .filter { it in ids && it != person.id }
+            .distinct()
+        if (legacy.isNotEmpty()) {
+            return (legacy + extraParents[person.id].orEmpty().filter { it in ids }).distinct()
         }
         return extraParents[person.id].orEmpty().filter { it in ids && it != person.id }.distinct()
     }

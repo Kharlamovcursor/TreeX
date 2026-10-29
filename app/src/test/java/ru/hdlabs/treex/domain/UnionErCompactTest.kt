@@ -27,7 +27,7 @@ class UnionErCompactTest {
     }
 
     @Test
-    fun parentIdsPreferLegacyFields() {
+    fun parentIdsPreferUnionsOverLegacyFields() {
         val people = listOf(
             PersonEntity(id = "f", gender = "m"),
             PersonEntity(id = "m", gender = "f"),
@@ -37,7 +37,7 @@ class UnionErCompactTest {
             UnionEntity(id = "pu-x", partnerAId = "m", childIds = "c"),
         )
         val parents = UnionEr.parentIdsOf(people[2], people.map { it.id }.toSet(), wrongUnion)
-        assertEquals(listOf("f", "m"), parents.sorted())
+        assertEquals(listOf("m"), parents)
     }
 
     @Test

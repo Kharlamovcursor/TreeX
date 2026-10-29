@@ -260,6 +260,22 @@ fun SettingsScreen(nav: NavHostController) {
                 color = HdTextSecondary,
                 modifier = Modifier.padding(top = 6.dp),
             )
+            Spacer(Modifier.height(10.dp))
+            HdSecondaryButton("Проверить целостность древа") {
+                scope.launch {
+                    progress = "Проверка данных…"
+                    try {
+                        val issues = repo.validateTree()
+                        feedbackMessage = if (issues.isEmpty()) {
+                            "Проблем в родстве не найдено."
+                        } else {
+                            issues.joinToString("\n\n") { it.message }
+                        }
+                    } finally {
+                        progress = null
+                    }
+                }
+            }
         }
         Spacer(Modifier.height(12.dp))
         HdCard {

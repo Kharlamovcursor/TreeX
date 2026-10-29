@@ -121,7 +121,7 @@ fun PersonEditorScreen(routeId: String, role: String, anchor: String, nav: NavHo
     val scope = rememberCoroutineScope()
     val spouseDrafts = parseSpouseDrafts(spouseRaw)
     val spouseIds = spouseDrafts.map { it.personId }
-    val attach = if (creating && anchor.isNotBlank() && role in setOf("father", "mother", "spouse", "sister", "brother")) {
+    val attach = if (creating && anchor.isNotBlank() && role in setOf("father", "mother", "spouse", "sister", "brother", "child")) {
         RelativeAttach(anchor, role)
     } else {
         null
@@ -266,26 +266,19 @@ fun PersonEditorScreen(routeId: String, role: String, anchor: String, nav: NavHo
                 }
             }
             "child" -> {
-                val father = if (host.gender == "m") {
-                    host.id
-                } else {
-                    hostSpouses.firstOrNull { id -> current.people.find { it.id == id }?.gender == "m" }.orEmpty()
-                }
-                val mother = if (host.gender == "f") {
-                    host.id
-                } else {
-                    hostSpouses.firstOrNull { id -> current.people.find { it.id == id }?.gender == "f" }.orEmpty()
-                }
-                if (fatherId.isBlank() && father.isNotBlank()) {
-                    fatherId = father
-                    buffer.mark("father")
-                }
-                if (motherId.isBlank() && mother.isNotBlank()) {
-                    motherId = mother
-                    buffer.mark("mother")
+                when (host.gender) {
+                    "m" -> if (fatherId.isBlank()) {
+                        fatherId = host.id
+                        buffer.mark("father")
+                    }
+                    "f" -> if (motherId.isBlank()) {
+                        motherId = host.id
+                        buffer.mark("mother")
+                    }
+                    else -> Unit
                 }
                 if (lastName.isBlank()) {
-                    lastName = current.people.find { it.id == father }?.lastName ?: host.lastName
+                    lastName = host.lastName
                     buffer.mark("lastName")
                 }
             }
@@ -562,9 +555,18 @@ fun PersonEditorScreen(routeId: String, role: String, anchor: String, nav: NavHo
 fun PersonDetailScreen(personId: String, nav: NavHostController) {
     val context = LocalContext.current
     val app = context.applicationContext as TreeXApplication
-    val tree by app.container.treeRepository.observe().collectAsStateWithLifecycle(TreeState())
+    val repo = app.container.treeRepository
+    val scope = rememberCoroutineScope()
+    val tree by repo.observe().collectAsStateWithLifecycle(TreeState())
     val person = tree.people.find { it.id == personId }
     var confirmDelete by remember { mutableStateOf(false) }
+    var deleteImpact by remember { mutableStateOf<ru.hdlabs.treex.domain.DeletePersonImpact?>(null) }
+    var mergeCandidate by remember { mutableStateOf<PersonEntity?>(null) }
+    var mergeConfirm by remember { mutableStateOf(false) }
+    val livingIds = remember(tree.people) { tree.people.filter { !it.vacant }.map { it.id }.toSet() }
+    val unionsCompact = remember(tree.people, tree.unions) {
+        ru.hdlabs.treex.domain.UnionEr.compactUnions(tree.people, tree.unions)
+    }
     if (person == null) {
         HdScaffold(title = "Карточка", onBack = { nav.popBackStack() }) {
             Text("Этой карточки уже нет", color = HdTextSecondary)
@@ -572,7 +574,16 @@ fun PersonDetailScreen(personId: String, nav: NavHostController) {
         return
     }
     val spouses = spouseIdsOf(tree.unions, person.id).mapNotNull { id -> tree.people.find { it.id == id } }
-    val children = tree.people.filter { it.fatherId == person.id || it.motherId == person.id }
+    val children = tree.people.filter { child ->
+        person.id in ru.hdlabs.treex.domain.UnionEr.parentIdsOf(child, livingIds, unionsCompact)
+    }
+    val duplicateCandidates = tree.people.filter { other ->
+        other.id != person.id && !other.vacant &&
+            other.lastName.equals(person.lastName, true) &&
+            other.firstName.equals(person.firstName, true) &&
+            other.middleName.equals(person.middleName, true) &&
+            person.lastName.isNotBlank() && person.firstName.isNotBlank()
+    }
     val siblings = siblingGroupsOf(person, tree.people)
     if (person.isVacantSlot()) {
         HdScaffold(title = "Пустое место", onBack = { nav.popBackStack() }) {
@@ -623,8 +634,18 @@ fun PersonDetailScreen(personId: String, nav: NavHostController) {
         }
         Spacer(Modifier.height(12.dp))
         HdCard {
-            LinkLine("Отец", tree.people.find { it.id == person.fatherId }, nav)
-            LinkLine("Мать", tree.people.find { it.id == person.motherId }, nav)
+            Text("Родственные связи", color = HdTextPrimary, fontWeight = FontWeight.SemiBold)
+            Text("«Убрать связь» удаляет только эту линию; человек остаётся в древе.", color = HdTextSecondary, modifier = Modifier.padding(bottom = 6.dp))
+            LinkLine("Отец", tree.people.find { it.id == person.fatherId }, nav) {
+                person.fatherId?.let { fid ->
+                    scope.launch { repo.detachParentChild(person.id, fid) }
+                }
+            }
+            LinkLine("Мать", tree.people.find { it.id == person.motherId }, nav) {
+                person.motherId?.let { mid ->
+                    scope.launch { repo.detachParentChild(person.id, mid) }
+                }
+            }
             if (spouses.isEmpty()) {
                 Text("Супруг не указан", color = HdTextSecondary)
             } else {
@@ -632,11 +653,17 @@ fun PersonDetailScreen(personId: String, nav: NavHostController) {
                     val married = tree.unions.find {
                         setOf(it.partnerAId, it.partnerBId) == setOf(person.id, spouse.id)
                     }?.marriedOn.orEmpty()
-                    LinkLine(spouseNoun(person.gender), spouse, nav, if (married.isBlank()) "" else ", брак $married")
+                    LinkLine(spouseNoun(person.gender), spouse, nav, if (married.isBlank()) "" else ", брак $married") {
+                        scope.launch { repo.detachSpouse(person.id, spouse.id) }
+                    }
                 }
             }
             if (children.isEmpty()) Text("Детей в древе нет", color = HdTextSecondary, modifier = Modifier.padding(top = 6.dp))
-            else children.forEach { LinkLine("Ребёнок", it, nav) }
+            else children.forEach { child ->
+                LinkLine("Ребёнок", child, nav) {
+                    scope.launch { repo.detachParentChild(child.id, person.id) }
+                }
+            }
             if (siblings.full.isNotEmpty()) {
                 Spacer(Modifier.height(8.dp))
                 Text("Братья и сёстры", color = HdTextPrimary, fontWeight = FontWeight.SemiBold)
@@ -683,7 +710,44 @@ fun PersonDetailScreen(personId: String, nav: NavHostController) {
             color = HdTextSecondary,
         )
         Spacer(Modifier.height(8.dp))
-        HdSecondaryButton("Удалить карточку") { confirmDelete = true }
+        if (duplicateCandidates.isNotEmpty()) {
+            Spacer(Modifier.height(8.dp))
+            HdSecondaryButton("Объединить с похожей карточкой") {
+                mergeCandidate = duplicateCandidates.first()
+                mergeConfirm = true
+            }
+        }
+        Spacer(Modifier.height(8.dp))
+        HdSecondaryButton("Удалить карточку") {
+            scope.launch {
+                deleteImpact = repo.previewDeletePerson(person.id)
+                confirmDelete = true
+            }
+        }
+    }
+    if (mergeConfirm && mergeCandidate != null) {
+        val other = mergeCandidate!!
+        AlertDialog(
+            onDismissRequest = { mergeConfirm = false },
+            title = { Text("Объединить дубликаты?") },
+            text = {
+                Text(
+                    "Останется «${person.fullName()}», карточка «${other.fullName()}» будет удалена. " +
+                        "Связи перенесутся. Это нельзя отменить.",
+                    color = HdTextSecondary,
+                )
+            },
+            confirmButton = {
+                HdPrimaryButton("Объединить") {
+                    mergeConfirm = false
+                    scope.launch {
+                        repo.mergePersonsConfirmed(person.id, other.id)
+                        mergeCandidate = null
+                    }
+                }
+            },
+            dismissButton = { HdSecondaryButton("Отмена") { mergeConfirm = false } },
+        )
     }
     if (confirmDelete) {
         AlertDialog(
@@ -691,7 +755,7 @@ fun PersonDetailScreen(personId: String, nav: NavHostController) {
             title = { Text(if (person.isVacantSlot()) "Убрать пустое место?" else "Удалить карточку?") },
             text = {
                 Text(
-                    if (person.isVacantSlot()) {
+                    deleteImpact?.summary ?: if (person.isVacantSlot()) {
                         "Место исчезнет с древа. Снимок сохранится в истории."
                     } else {
                         "Карточка станет пустым местом: древо и связи на месте. Снимок сохранится в истории."
@@ -714,11 +778,25 @@ fun PersonDetailScreen(personId: String, nav: NavHostController) {
 }
 
 @Composable
-private fun LinkLine(label: String, person: PersonEntity?, nav: NavHostController, suffix: String = "") {
+private fun LinkLine(
+    label: String,
+    person: PersonEntity?,
+    nav: NavHostController,
+    suffix: String = "",
+    onRemoveLink: (() -> Unit)? = null,
+) {
     if (person == null) {
         Text("$label: не указан", color = HdTextSecondary, modifier = Modifier.padding(vertical = 4.dp))
     } else {
-        HdSecondaryButton("$label: ${person.fullName()}$suffix") { nav.navigate(Routes.person(person.id)) }
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            HdSecondaryButton(
+                "$label: ${person.fullName()}$suffix",
+                modifier = Modifier.weight(1f),
+            ) { nav.navigate(Routes.person(person.id)) }
+            if (onRemoveLink != null) {
+                HdSecondaryButton("Убрать связь", modifier = Modifier.weight(1f), onClick = onRemoveLink)
+            }
+        }
         Spacer(Modifier.height(8.dp))
     }
 }

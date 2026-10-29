@@ -148,4 +148,62 @@ object FamilyTreeMutations {
             else -> union
         }
     }
+
+    /** Удаляет только брачный союз без детей; люди остаются. */
+    fun removeSpousePartnership(state: FamilyTreeState, a: String, b: String): FamilyTreeState {
+        val want = setOf(a, b)
+        return state.copy(
+            unions = state.unions.filterNot { union ->
+                val partners = setOfNotNull(union.partner1Id, union.partner2Id)
+                partners == want && union.childrenIds.isEmpty()
+            },
+        )
+    }
+
+    /** Убирает связь родитель–ребёнок; ребёнок и остальные связи сохраняются. */
+    fun removeParentChildEdge(state: FamilyTreeState, childId: String, parentId: String): FamilyTreeState {
+        require(state.person(childId) != null) { "Child $childId must exist" }
+        var next = state
+        next.unions.filter { union ->
+            childId in union.childrenIds &&
+                parentId in listOfNotNull(union.partner1Id, union.partner2Id)
+        }.forEach { union ->
+            val partners = listOfNotNull(union.partner1Id, union.partner2Id)
+            val remaining = partners.filter { it != parentId }
+            val otherChildren = union.childrenIds.filter { it != childId }
+            next = next.copy(
+                unions = next.unions.map { if (it.id == union.id) it.copy(childrenIds = otherChildren) else it },
+            )
+            remaining.forEach { otherParent ->
+                next = appendChildToSingleParentUnion(next, otherParent, childId)
+            }
+        }
+        return next.copy(
+            unions = next.unions.filter { u ->
+                u.childrenIds.isNotEmpty() || (u.partner1Id != null && u.partner2Id != null)
+            },
+        )
+    }
+
+    private fun appendChildToSingleParentUnion(
+        state: FamilyTreeState,
+        parentId: String,
+        childId: String,
+    ): FamilyTreeState {
+        val singleId = singleParentUnionId(parentId)
+        val child = state.person(childId) ?: return state
+        val existing = state.unions.find { it.id == singleId }
+        if (existing != null) {
+            return state.copy(
+                unions = state.unions.map {
+                    if (it.id == singleId) it.copy(childrenIds = (it.childrenIds + childId).distinct()) else it
+                },
+            )
+        }
+        val (withUnion, union) = addUnion(state, parentId, null, unionId = singleId)
+        return addChildToUnion(withUnion, union.id, child)
+    }
+
+    fun removeChildFromParent(state: FamilyTreeState, parentId: String, childId: String): FamilyTreeState =
+        removeParentChildEdge(state, childId, parentId)
 }

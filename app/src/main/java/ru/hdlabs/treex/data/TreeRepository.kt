@@ -39,9 +39,18 @@ import ru.hdlabs.treex.domain.stableUnionId
 import ru.hdlabs.treex.domain.SpouseDraft
 import ru.hdlabs.treex.domain.TreeRules
 import ru.hdlabs.treex.domain.siblingsMissingParent
+import ru.hdlabs.treex.domain.DataIssue
+import ru.hdlabs.treex.domain.DeletePersonImpact
+import ru.hdlabs.treex.domain.FamilyTreeMutations
+import ru.hdlabs.treex.domain.KinshipSync
+import ru.hdlabs.treex.domain.TreeDataValidator
 import ru.hdlabs.treex.domain.TreeIntegrity
 import ru.hdlabs.treex.domain.UnionEr
 import ru.hdlabs.treex.domain.UnionErAttach
+import ru.hdlabs.treex.domain.familyTreeStateFrom
+import ru.hdlabs.treex.domain.fullName
+import ru.hdlabs.treex.domain.hasBothPartners
+import ru.hdlabs.treex.domain.toUnionEntity
 import ru.hdlabs.treex.domain.childIdsList
 import ru.hdlabs.treex.domain.partnerIds
 import ru.hdlabs.treex.domain.mergePerson
@@ -134,7 +143,7 @@ class TreeRepository(
         }
     }
 
-    /** Clears broken parent links and unions tied to vacant slots (after messy deletes). */
+    /** Удаляет только пустые места и синхронизирует поля родителей из союзов (без «тихого» слияния). */
     suspend fun repairLivingKinship() {
         var changed = false
         mutex.withLock {
@@ -146,23 +155,138 @@ class TreeRepository(
                     changed = true
                     people = peopleDao.all()
                 }
-                val fixes = TreeIntegrity.repairParentPointers(people)
-                fixes.forEach { peopleDao.upsert(it) }
-                if (fixes.isNotEmpty()) changed = true
-                val unions = unionDao.all()
-                val compact = UnionEr.compactUnions(people, unions)
-                val kept = TreeIntegrity.livingUnions(compact, people)
-                if (kept.sortedBy { it.id } != unions.sortedBy { it.id }) {
-                    unionDao.deleteAll()
-                    unionDao.upsertAll(kept)
-                    changed = true
-                }
+                changed = syncLegacyParentFieldsLocked() || changed
             }
         }
         if (changed) {
             generation += 1
             schedulePush()
         }
+    }
+
+    suspend fun validateTree(): List<DataIssue> = mutex.withLock {
+        TreeDataValidator.validate(peopleDao.all(), unionDao.all())
+    }
+
+    suspend fun previewDeletePerson(id: String): DeletePersonImpact? = mutex.withLock {
+        val people = peopleDao.all()
+        val person = people.find { it.id == id } ?: return@withLock null
+        val unions = unionDao.all()
+        val ids = people.map { it.id }.toSet()
+        val compact = UnionEr.compactUnions(people, unions)
+        val children = people.filter { p ->
+            id in UnionEr.parentIdsOf(p, ids, compact)
+        }.map { it.fullName().ifBlank { it.id } }
+        val spouses = spouseDraftsOf(unions, id).mapNotNull { d ->
+            people.find { it.id == d.personId }?.fullName()?.ifBlank { d.personId }
+        }
+        val parents = UnionEr.parentIdsOf(person, ids, compact).mapNotNull { pid ->
+            people.find { it.id == pid }?.fullName()?.ifBlank { pid }
+        }
+        val summary = buildString {
+            append("Карточка «${person.fullName()}» ")
+            if (person.vacant) append("будет удалена с древа.") else append("станет пустым местом (данные и связи на месте).")
+            if (children.isNotEmpty()) append(" Дети (${children.size}) останутся в древе.")
+            if (spouses.isNotEmpty()) append(" Супруги останутся.")
+        }
+        DeletePersonImpact(
+            personId = id,
+            personLabel = person.fullName(),
+            becomesVacantSlot = !person.vacant,
+            childrenStayInTree = children,
+            spousesStayInTree = spouses,
+            parentLinksRemoved = parents,
+            summary = summary,
+        )
+    }
+
+    suspend fun detachSpouse(personId: String, spouseId: String) = applyKinshipMutation { state ->
+        FamilyTreeMutations.removeSpousePartnership(state, personId, spouseId)
+    }
+
+    suspend fun detachParentChild(childId: String, parentId: String) = applyKinshipMutation { state ->
+        FamilyTreeMutations.removeParentChildEdge(state, childId, parentId)
+    }
+
+    /** Объединение дубликатов только по явному вызову (keep остаётся, remove удаляется). */
+    suspend fun mergePersonsConfirmed(keepId: String, removeId: String) {
+        require(keepId != removeId) { "Нельзя объединить карточку с самой собой" }
+        mutex.withLock {
+            database.withTransaction {
+                snapshotLocked(readLocked())
+                val people = peopleDao.all()
+                val keep = people.find { it.id == keepId } ?: error("Карточка не найдена")
+                val remove = people.find { it.id == removeId } ?: error("Вторая карточка не найдена")
+                val unions = unionDao.all().map { union ->
+                    union.copy(
+                        partnerAId = union.partnerAId?.replace(removeId, keepId),
+                        partnerBId = union.partnerBId?.replace(removeId, keepId),
+                        childIds = union.childIdsList().joinToString(",") { if (it == removeId) keepId else it },
+                    )
+                }.distinctBy { it.id }
+                val compact = UnionEr.compactUnions(people.filter { it.id != removeId }, unions)
+                unionDao.deleteAll()
+                unionDao.upsertAll(compact)
+                people.filter { it.id != removeId }.forEach { person ->
+                    val synced = KinshipSync.parentFieldsFromUnions(person, people, compact)
+                        .let { p ->
+                            p.copy(
+                                fatherId = p.fatherId?.replace(removeId, keepId),
+                                motherId = p.motherId?.replace(removeId, keepId),
+                            )
+                        }
+                    if (person.id == keepId) {
+                        peopleDao.upsert(
+                            synced.copy(
+                                notes = listOf(keep.notes, remove.notes).filter { it.isNotBlank() }.joinToString("\n"),
+                                updatedAtMillis = System.currentTimeMillis(),
+                            ),
+                        )
+                    } else {
+                        peopleDao.upsert(synced)
+                    }
+                }
+                if (remove.photoFile.isNotBlank() && keep.photoFile.isBlank()) {
+                    peopleDao.upsert(keep.copy(photoFile = remove.photoFile))
+                }
+                purgePersonLocked(remove, people)
+                generation += 1
+            }
+        }
+        schedulePush()
+    }
+
+    private suspend fun applyKinshipMutation(
+        transform: (ru.hdlabs.treex.domain.FamilyTreeState) -> ru.hdlabs.treex.domain.FamilyTreeState,
+    ) {
+        mutex.withLock {
+            database.withTransaction {
+                snapshotLocked(readLocked())
+                val people = peopleDao.all()
+                val unions = unionDao.all()
+                var state = familyTreeStateFrom(people, unions)
+                state = transform(state)
+                unionDao.deleteAll()
+                unionDao.upsertAll(state.unions.map { it.toUnionEntity() })
+                syncLegacyParentFieldsLocked()
+                generation += 1
+            }
+        }
+        schedulePush()
+    }
+
+    private suspend fun syncLegacyParentFieldsLocked(): Boolean {
+        val people = peopleDao.all()
+        val unions = unionDao.all()
+        var changed = false
+        KinshipSync.syncAllPeopleParentFields(people, unions).forEach { synced ->
+            val prev = people.find { it.id == synced.id } ?: return@forEach
+            if (prev.fatherId != synced.fatherId || prev.motherId != synced.motherId) {
+                peopleDao.upsert(synced.copy(updatedAtMillis = System.currentTimeMillis()))
+                changed = true
+            }
+        }
+        return changed
     }
 
     suspend fun savePerson(
@@ -262,8 +386,13 @@ class TreeRepository(
                             updatedAtMillis = now,
                         ),
                     )
-                    val kept = unionDao.all().filter {
-                        it.partnerAId != clean.id && it.partnerBId != clean.id
+                    val kept = unionDao.all().filter { union ->
+                        when {
+                            clean.id !in union.partnerIds() -> true
+                            union.childIdsList().isNotEmpty() -> true
+                            union.hasBothPartners() && union.childIdsList().isEmpty() -> false
+                            else -> true
+                        }
                     }
                     val created = nextSpouses.map { spouse ->
                         val a = minOf(clean.id, spouse.personId)
@@ -278,6 +407,7 @@ class TreeRepository(
                     val unionsWithParents = mergeInferredParentUnions(afterAttach, peopleDao.all())
                     unionDao.deleteAll()
                     unionDao.upsertAll(unionsWithParents)
+                    syncLegacyParentFieldsLocked()
                     generation += 1
                     if (snapshot) snapshotLocked(readLocked())
                     true

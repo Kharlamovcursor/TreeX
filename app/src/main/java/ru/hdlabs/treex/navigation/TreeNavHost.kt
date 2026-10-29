@@ -124,9 +124,11 @@ fun TreeNavHost() {
             }
         }
         launch {
-            runCatching {
-                app.container.treeRepository.repairLivingKinship()
-                app.container.treeRepository.reconcileParentUnions()
+            runCatching { app.container.treeRepository.repairLivingKinship() }
+            val issues = runCatching { app.container.treeRepository.validateTree() }.getOrDefault(emptyList())
+            if (issues.isNotEmpty()) {
+                gitNotice = "Обнаружено ${issues.size} проблем в данных. Откройте карточку или настройки."
+                AppEventLog.info("integrity", issues.first().message)
             }
         }
         launch {

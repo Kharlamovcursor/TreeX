@@ -32,16 +32,15 @@ object UnionErAttach {
         child: FamilyPerson,
     ): FamilyTreeState {
         var next = FamilyTreeMutations.addPerson(state, child)
-        val couple = reconciled.firstOrNull { union ->
-            anchorId in union.partnerIds() && union.hasBothPartners()
+        val singleParentUnion = reconciled.firstOrNull { union ->
+            anchorId in union.partnerIds() &&
+                union.childIdsList().isNotEmpty() &&
+                !union.hasBothPartners()
+        } ?: reconciled.firstOrNull { union ->
+            union.id == singleParentUnionId(anchorId) && anchorId in union.partnerIds()
         }
-        if (couple != null) {
-            val partners = couple.partnerIds()
-            return FamilyTreeMutations.addChildToCouple(next, partners[0], partners[1], child)
-        }
-        val single = reconciled.firstOrNull { anchorId in it.partnerIds() }
-        if (single != null) {
-            return FamilyTreeMutations.addChildToUnion(next, single.id, child)
+        if (singleParentUnion != null) {
+            return FamilyTreeMutations.addChildToUnion(next, singleParentUnion.id, child)
         }
         val (withUnion, union) = FamilyTreeMutations.addUnion(next, anchorId, partner2Id = null)
         return FamilyTreeMutations.addChildToUnion(withUnion, union.id, child)
