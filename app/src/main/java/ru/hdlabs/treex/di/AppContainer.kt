@@ -12,7 +12,7 @@ import ru.hdlabs.treex.update.GitHubUpdateSource
 
 class AppContainer(context: Context) {
     private val appContext = context.applicationContext
-    val relativesTreeEngine = RelativesTreeJsEngine(appContext)
+    val relativesTreeEngine = RelativesTreeJsEngine()
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     val settingsRepository = SettingsRepository(appContext)
     val treeRepository = TreeRepository(

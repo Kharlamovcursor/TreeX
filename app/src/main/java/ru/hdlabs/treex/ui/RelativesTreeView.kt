@@ -17,7 +17,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -30,7 +29,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -43,6 +41,7 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import ru.hdlabs.treex.TreeXApplication
 import ru.hdlabs.treex.data.local.PersonEntity
 import ru.hdlabs.treex.data.local.UnionEntity
+import ru.hdlabs.treex.diagnostic.AppEventLog
 import ru.hdlabs.treex.domain.OpenLink
 import ru.hdlabs.treex.domain.fullName
 import ru.hdlabs.treex.domain.isVacantSlot
@@ -57,8 +56,7 @@ import ru.hdlabs.treex.ui.theme.HdTextPrimary
 import ru.hdlabs.treex.ui.theme.HdTextSecondary
 
 /**
- * Genealogy tree module UI: relatives-tree layout + absolute cards + connector lines (TZ §3).
- * Falls back to [FamilyTree] if layout engine fails.
+ * Genealogy tree: relatives-tree layout when available; [FamilyTree] shown immediately (no blocking spinner).
  */
 @Composable
 fun RelativesTreeView(
@@ -80,35 +78,39 @@ fun RelativesTreeView(
     val context = LocalContext.current
     val engine = remember { (context.applicationContext as TreeXApplication).container.relativesTreeEngine }
     var layout by remember { mutableStateOf<RelativesTreeData?>(null) }
-    var loading by remember { mutableStateOf(false) }
-    var failed by remember { mutableStateOf(false) }
     val rootId = homePersonId.ifBlank { people.firstOrNull { !it.vacant }?.id.orEmpty() }
+    val peopleKey = remember(people, unions) {
+        people.joinToString { it.id + it.updatedAtMillis } + unions.joinToString { it.id + it.childIds }
+    }
 
-    LaunchedEffect(people, unions, rootId, centerToken) {
-        if (people.none { !it.vacant }) {
-            layout = null
-            failed = false
-            return@LaunchedEffect
-        }
-        loading = true
-        failed = false
+    LaunchedEffect(peopleKey, rootId, centerToken) {
+        layout = null
+        if (people.none { !it.vacant }) return@LaunchedEffect
+        if (!engine.isAttached) return@LaunchedEffect
         layout = runCatching {
             val nodes = RelativesTreeConverter.toGraphNodes(people, unions)
             require(nodes.isNotEmpty())
-            val effectiveRoot = rootId.takeIf { it in nodes.map { n -> n.id }.toSet() } ?: nodes.first().id
+            val ids = nodes.map { it.id }.toSet()
+            val effectiveRoot = rootId.takeIf { it in ids } ?: nodes.first().id
             engine.calcTree(nodes, effectiveRoot)
-        }.getOrElse {
-            failed = true
-            null
-        }
-        loading = false
+        }.onFailure { error ->
+            AppEventLog.error("relatives-tree", "Layout calc failed, using FamilyTree", error)
+        }.getOrNull()
     }
 
-    when {
-        loading -> Box(modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            CircularProgressIndicator(color = HdBlue)
-        }
-        failed || layout == null -> FamilyTree(
+    if (layout != null) {
+        RelativesTreeCanvas(
+            people = people,
+            layout = layout!!,
+            selectedId = selectedId,
+            freshId = freshId,
+            detachedBranchIds = detachedBranchIds,
+            modifier = modifier,
+            onSelect = onSelect,
+            onOpenDetail = onOpenDetail,
+        )
+    } else {
+        FamilyTree(
             people = people,
             unions = unions,
             openLinks = openLinks,
@@ -123,16 +125,6 @@ fun RelativesTreeView(
             onSelect = onSelect,
             onOpenDetail = onOpenDetail,
             onHoldLink = onHoldLink,
-        )
-        else -> RelativesTreeCanvas(
-            people = people,
-            layout = layout!!,
-            selectedId = selectedId,
-            freshId = freshId,
-            detachedBranchIds = detachedBranchIds,
-            modifier = modifier,
-            onSelect = onSelect,
-            onOpenDetail = onOpenDetail,
         )
     }
 }
