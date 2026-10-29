@@ -64,6 +64,38 @@ class GitHubTreeSync(
         return emptyList()
     }
 
+    fun fetchShaAt(relativePath: String): String? {
+        val encoded = encodedPath(relativePath)
+        val url = "https://api.github.com/repos/$owner/$repo/contents/$encoded?ref=${encode(branch)}"
+        val (code, body) = request("GET", url, null)
+        if (code == 404) return null
+        if (code !in 200..299) throw IllegalStateException(githubMessage(code, body))
+        return json.parseToJsonElement(body).jsonObject["sha"]?.jsonPrimitive?.content
+    }
+
+    fun pushBytesAt(relativePath: String, bytes: ByteArray, currentSha: String?, message: String): String {
+        require(bytes.size <= 900_000) { "Файл слишком большой для GitHub API" }
+        val encoded = encodedPath(relativePath)
+        val payload = buildString {
+            append("{\"message\":")
+            append(jsonString(message))
+            append(",\"content\":")
+            append(jsonString(Base64.getEncoder().encodeToString(bytes)))
+            append(",\"branch\":")
+            append(jsonString(branch))
+            if (!currentSha.isNullOrBlank()) {
+                append(",\"sha\":")
+                append(jsonString(currentSha))
+            }
+            append('}')
+        }
+        val url = "https://api.github.com/repos/$owner/$repo/contents/$encoded"
+        val (code, body) = request("PUT", url, payload)
+        if (code !in 200..299) throw IllegalStateException(githubMessage(code, body))
+        return json.parseToJsonElement(body).jsonObject["content"]?.jsonObject?.get("sha")?.jsonPrimitive?.content
+            ?: throw IllegalStateException("GitHub не вернул номер версии")
+    }
+
     fun push(text: String, currentSha: String?, message: String): String {
         val bytes = text.toByteArray(Charsets.UTF_8)
         require(bytes.size <= 900_000) {
@@ -121,8 +153,10 @@ class GitHubTreeSync(
         return RemoteFile(sha, text)
     }
 
-    private fun encodedPath(): String =
-        path.trim().trim('/').split('/').filter { it.isNotBlank() }.joinToString("/") { encode(it) }
+    private fun encodedPath(): String = encodedPath(path)
+
+    private fun encodedPath(relativePath: String): String =
+        relativePath.trim().trim('/').split('/').filter { it.isNotBlank() }.joinToString("/") { encode(it) }
 
     private fun commitsListUrl(branch: String?, filePath: String?): String {
         val query = buildList {

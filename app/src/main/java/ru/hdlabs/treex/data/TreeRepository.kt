@@ -54,7 +54,10 @@ import ru.hdlabs.treex.domain.treeGitCommitMessage
 import ru.hdlabs.treex.domain.userFio
 import ru.hdlabs.treex.domain.planBranchConnect
 import ru.hdlabs.treex.sync.GitHubTreeSync
+import ru.hdlabs.treex.BuildConfig
 import ru.hdlabs.treex.diagnostic.AppEventLog
+import ru.hdlabs.treex.diagnostic.TreeSnapshotRenderer
+import ru.hdlabs.treex.data.PhotoStore
 import ru.hdlabs.treex.util.NetworkHelper
 import ru.hdlabs.treex.sync.GitRelation
 import ru.hdlabs.treex.sync.inspectGitRefresh
@@ -91,6 +94,9 @@ class TreeRepository(
     private val settingsRepository: SettingsRepository,
     private val scope: CoroutineScope,
 ) {
+    companion object {
+        const val DEBUG_TREE_SNAPSHOT_PATH = "family/debug/tree-layout.png"
+    }
     private val peopleDao = database.personDao()
     private val unionDao = database.unionDao()
     private val mutex = Mutex()
@@ -692,6 +698,52 @@ class TreeRepository(
                     "Древо изменилось во время отправки. Подождите пару секунд и нажмите «Отправить в Git сейчас» ещё раз.",
                 )
         }
+    }
+
+    /** PNG всего древа в Git (для разбора ошибок компоновки). Не трогает family/tree.json. */
+    suspend fun pushTreeSnapshotToGit(): String = gitMutex.withLock {
+        val settings = settingsRepository.settings.first()
+        if (!settings.gitConfigured) {
+            throw IllegalStateException("Git не настроен — снимок некуда отправить.")
+        }
+        val snapshotData = mutex.withLock {
+            Triple(peopleDao.all(), unionDao.all(), openLinksState.value)
+        }
+        val (people, unions, links) = snapshotData
+        val living = people.count { !it.vacant }
+        if (living == 0) throw IllegalStateException("Древо пустое — снимать нечего.")
+        val home = settings.homePersonId
+        val png = withContext(Dispatchers.Default) {
+            TreeSnapshotRenderer.renderPng(context, people, unions, links, home)
+        }
+        val sync = syncFor(settings)
+        val message = "TreeX layout snapshot ${BuildConfig.VERSION_NAME}, $living people"
+        withContext(Dispatchers.IO) {
+            val sha = sync.fetchShaAt(DEBUG_TREE_SNAPSHOT_PATH)
+            sync.pushBytesAt(DEBUG_TREE_SNAPSHOT_PATH, png, sha, message)
+        }
+        AppEventLog.info("debug", "Layout snapshot → Git ($living people)")
+        "Снимок отправлен: ${settings.githubOwner}/${settings.githubRepo}, $DEBUG_TREE_SNAPSHOT_PATH"
+    }
+
+    /** Временная очистка: снимок в истории, затем удаляются все люди и союзы. */
+    suspend fun wipeTree(): String {
+        mutex.withLock {
+            database.withTransaction {
+                snapshotLocked(readLocked())
+                peopleDao.all().forEach { person ->
+                    if (person.photoFile.isNotBlank()) {
+                        PhotoStore.delete(context, person.photoFile)
+                    }
+                }
+                peopleDao.deleteAll()
+                unionDao.deleteAll()
+                writeOpenLinks(emptyList())
+                generation += 1
+            }
+        }
+        schedulePush()
+        return "Древо очищено. Перед очисткой сохранён снимок в «История»."
     }
 
     suspend fun remoteCommits(): List<GitHubTreeSync.RemoteCommit> {

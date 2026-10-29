@@ -68,11 +68,14 @@ private const val DEVELOPER_SETTINGS_PASSWORD = "86712"
 fun SettingsScreen(nav: NavHostController) {
     val context = LocalContext.current
     val app = context.applicationContext as TreeXApplication
+    val repo = app.container.treeRepository
     val settings by app.container.settingsRepository.settings.collectAsStateWithLifecycle(AppSettings())
     val scope = rememberCoroutineScope()
     var progress by remember { mutableStateOf<String?>(null) }
     var reportMessage by remember { mutableStateOf<String?>(null) }
     var reportLoading by remember { mutableStateOf(false) }
+    var snapshotLoading by remember { mutableStateOf(false) }
+    var feedbackMessage by remember { mutableStateOf<String?>(null) }
 
     HdScaffold(title = "Настройки", onBack = { nav.popBackStack() }, progressMessage = progress) {
         HdCard {
@@ -140,7 +143,59 @@ fun SettingsScreen(nav: NavHostController) {
                 }
             }
             Text(
-                "Файл с версией приложения и последними ошибками (без древа и паролей). Отправьте в Telegram или MAX.",
+                "Файл с версией и последними ошибками (без древа). Отправьте его вместе с сообщением разработчику.",
+                color = HdTextSecondary,
+                modifier = Modifier.padding(top = 6.dp),
+            )
+        }
+        Spacer(Modifier.height(12.dp))
+        HdCard {
+            Text("Связь с разработчиком", color = HdTextPrimary, fontWeight = FontWeight.SemiBold)
+            Text(
+                "Если древо отображается неправильно или что-то сломалось — напишите Якову (Telegram @Yakofffff или MAX, Yakoff). " +
+                    "Можно приложить отчёт о проблеме и снимок древа в Git.",
+                color = HdTextSecondary,
+                modifier = Modifier.padding(top = 6.dp, bottom = 10.dp),
+            )
+            HdPrimaryButton("Написать в Telegram") {
+                TelegramFeedback.open(context).onFailure { feedbackMessage = it.message ?: "Не удалось открыть Telegram" }
+            }
+            Spacer(Modifier.height(8.dp))
+            HdSecondaryButton("Написать в MAX") {
+                MaxFeedback.open(context).onFailure { feedbackMessage = it.message ?: "Не удалось открыть MAX" }
+            }
+            Spacer(Modifier.height(12.dp))
+            HdSecondaryButton(
+                "Отправить снимок древа в Git",
+                loading = snapshotLoading,
+                loadingText = "Рисуем и отправляем…",
+                enabled = settings.gitConfigured,
+            ) {
+                scope.launch {
+                    snapshotLoading = true
+                    progress = "Снимок всего древа…"
+                    try {
+                        val result = repo.pushTreeSnapshotToGit()
+                        feedbackMessage = result
+                        AppEventLog.info("debug", "Пользователь отправил снимок древа в Git")
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        feedbackMessage = e.message ?: "Не удалось отправить снимок"
+                        AppEventLog.error("debug", feedbackMessage ?: "snapshot", e)
+                    } finally {
+                        snapshotLoading = false
+                        progress = null
+                    }
+                }
+            }
+            Text(
+                if (settings.gitConfigured) {
+                    "PNG со всеми карточками и линиями (файл family/debug/tree-layout.png в репозитории). " +
+                        "JSON древа не меняется."
+                } else {
+                    "Снимок в Git доступен, когда настроена синхронизация (встроенный Git в семейной сборке)."
+                },
                 color = HdTextSecondary,
                 modifier = Modifier.padding(top = 6.dp),
             )
@@ -157,6 +212,14 @@ fun SettingsScreen(nav: NavHostController) {
             title = { Text("Отчёт") },
             text = { Text(text, color = HdTextSecondary) },
             confirmButton = { HdPrimaryButton("Понятно") { reportMessage = null } },
+        )
+    }
+    feedbackMessage?.let { text ->
+        AlertDialog(
+            onDismissRequest = { feedbackMessage = null },
+            title = { Text("Обратная связь") },
+            text = { Text(text, color = HdTextSecondary) },
+            confirmButton = { HdPrimaryButton("Понятно") { feedbackMessage = null } },
         )
     }
 }
@@ -188,6 +251,8 @@ fun DeveloperSettingsScreen(nav: NavHostController) {
     var unlocked by remember { mutableStateOf(false) }
     var gatePassword by remember { mutableStateOf("") }
     var gateError by remember { mutableStateOf(false) }
+    var wipeStep by remember { mutableStateOf(0) }
+    var wipeLoading by remember { mutableStateOf(false) }
 
     LaunchedEffect(settings) {
         if (!hydrated) {
@@ -473,18 +538,19 @@ fun DeveloperSettingsScreen(nav: NavHostController) {
             }
         }
         Spacer(Modifier.height(16.dp))
-        Text("Связь с разработчиком", color = HdTextPrimary, fontWeight = FontWeight.SemiBold)
-        Text(
-            "Telegram @Yakofffff или мессенджер MAX, Yakoff.",
-            color = HdTextSecondary,
-            modifier = Modifier.padding(top = 4.dp, bottom = 8.dp),
-        )
-        HdSecondaryButton("Связаться в Telegram") {
-            TelegramFeedback.open(context).onFailure { message = it.message ?: "Не удалось открыть Telegram" }
-        }
-        Spacer(Modifier.height(8.dp))
-        HdSecondaryButton("Связаться в MAX") {
-            MaxFeedback.open(context).onFailure { message = it.message ?: "Не удалось открыть MAX" }
+        HdCard {
+            Text("Стереть древо (временно)", color = HdOrange, fontWeight = FontWeight.SemiBold)
+            Text(
+                "Удаляет всех людей и связи на этом телефоне. Перед очисткой сохраняется снимок в «История». " +
+                    "Для отладки пустого древа или повторного импорта.",
+                color = HdTextSecondary,
+                modifier = Modifier.padding(top = 6.dp, bottom = 10.dp),
+            )
+            HdSecondaryButton(
+                "Стереть всё древо",
+                loading = wipeLoading,
+                loadingText = "Очистка…",
+            ) { wipeStep = 1 }
         }
         if (message.isNotBlank()) Text(message, color = HdTextSecondary, modifier = Modifier.padding(top = 12.dp))
         Text("Версия ${BuildConfig.VERSION_NAME}", color = HdTextSecondary, modifier = Modifier.padding(top = 16.dp, bottom = 24.dp))
@@ -496,6 +562,46 @@ fun DeveloperSettingsScreen(nav: NavHostController) {
             title = { Text("Git") },
             text = { Text(text, color = HdTextSecondary) },
             confirmButton = { HdPrimaryButton("Понятно") { gitPushDialog = null } },
+        )
+    }
+
+    if (wipeStep == 1) {
+        AlertDialog(
+            onDismissRequest = { wipeStep = 0 },
+            title = { Text("Стереть древо?") },
+            text = {
+                Text(
+                    "Все карточки и связи на телефоне будут удалены. Снимок перед удалением попадёт в «История и откат».",
+                    color = HdTextSecondary,
+                )
+            },
+            confirmButton = { HdPrimaryButton("Продолжить") { wipeStep = 2 } },
+            dismissButton = { HdSecondaryButton("Отмена") { wipeStep = 0 } },
+        )
+    }
+    if (wipeStep == 2) {
+        AlertDialog(
+            onDismissRequest = { wipeStep = 0 },
+            title = { Text("Подтвердите очистку") },
+            text = { Text("Это необратимо на телефоне (в Git останется старая версия, пока не отправите снова).", color = HdTextSecondary) },
+            confirmButton = {
+                HdPrimaryButton("Стереть", loading = wipeLoading, loadingText = "…") {
+                    scope.launch {
+                        wipeLoading = true
+                        progress = "Очистка древа…"
+                        try {
+                            message = repo.wipeTree()
+                            wipeStep = 0
+                        } catch (e: Exception) {
+                            message = e.message ?: "Не удалось очистить"
+                        } finally {
+                            wipeLoading = false
+                            progress = null
+                        }
+                    }
+                }
+            },
+            dismissButton = { HdSecondaryButton("Отмена") { wipeStep = 0 } },
         )
     }
 
