@@ -61,18 +61,51 @@ object TreeCodec {
             }
         val unions = doc.unions
             .mapNotNull { union ->
-                if (union.partnerAId !in ids || union.partnerBId !in ids) return@mapNotNull null
-                if (union.partnerAId == union.partnerBId) return@mapNotNull null
-                val a = minOf(union.partnerAId, union.partnerBId)
-                val b = maxOf(union.partnerAId, union.partnerBId)
-                UnionRecord(id = "u-$a-$b", partnerAId = a, partnerBId = b, marriedOn = union.marriedOn.trim())
+                val a = union.partnerAId?.takeIf { it in ids }
+                val b = union.partnerBId?.takeIf { it in ids }
+                if (a == null && b == null) return@mapNotNull null
+                if (a != null && b != null && a == b) return@mapNotNull null
+                val childIds = union.childIds.filter { it in ids }.distinct().sorted()
+                when {
+                    a != null && b != null -> {
+                        val left = minOf(a, b)
+                        val right = maxOf(a, b)
+                        UnionRecord(
+                            id = union.id.ifBlank { stableUnionId(left, right) },
+                            partnerAId = left,
+                            partnerBId = right,
+                            marriedOn = union.marriedOn.trim(),
+                            childIds = childIds,
+                            unionType = union.unionType.ifBlank { "marriage" },
+                        )
+                    }
+                    else -> {
+                        val solo = a ?: b!!
+                        UnionRecord(
+                            id = union.id.ifBlank { "pu-$solo" },
+                            partnerAId = solo,
+                            partnerBId = null,
+                            marriedOn = union.marriedOn.trim(),
+                            childIds = childIds,
+                            unionType = union.unionType.ifBlank { "marriage" },
+                        )
+                    }
+                }
             }
             .groupBy { it.id }
             .map { (_, same) ->
-                same.first().copy(marriedOn = same.firstOrNull { it.marriedOn.isNotBlank() }?.marriedOn.orEmpty())
+                val first = same.first()
+                first.copy(
+                    marriedOn = same.firstOrNull { it.marriedOn.isNotBlank() }?.marriedOn.orEmpty(),
+                    childIds = same.flatMap { it.childIds }.distinct().sorted(),
+                )
             }
             .sortedBy { it.id }
-        val unionKeys = unions.map { it.partnerAId to it.partnerBId }.toMutableSet()
+        val unionKeys = unions.mapNotNull { u ->
+            val a = u.partnerAId ?: return@mapNotNull null
+            val b = u.partnerBId ?: return@mapNotNull null
+            a to b
+        }.toMutableSet()
         val inferred = people.mapNotNull { person ->
             val fatherId = person.fatherId ?: return@mapNotNull null
             val motherId = person.motherId ?: return@mapNotNull null
@@ -81,7 +114,12 @@ object TreeCodec {
             val b = maxOf(fatherId, motherId)
             if (a to b in unionKeys) return@mapNotNull null
             unionKeys.add(a to b)
-            UnionRecord(stableUnionId(a, b), a, b)
+            UnionRecord(
+                id = stableUnionId(a, b),
+                partnerAId = a,
+                partnerBId = b,
+                childIds = listOf(person.id),
+            )
         }
         val allUnions = (unions + inferred).sortedBy { it.id }
         return doc.copy(

@@ -23,6 +23,7 @@ internal object SugiyamaFamilyLayout {
         heights: Map<String, Float>,
     ): List<Placed> {
         if (people.isEmpty()) return emptyList()
+        val unions = UnionEr.reconcileChildMembership(people, unions)
         val ids = people.map { it.id }.toSet()
         val byId = people.associateBy { it.id }
         val generation = TreeLayout.generationMap(people, unions, openLinks)
@@ -33,17 +34,17 @@ internal object SugiyamaFamilyLayout {
             }
         }
         fun parentIdsOf(person: PersonEntity): List<String> =
-            FamilyKinship.parentIdsOf(person, ids, extraParents)
+            FamilyKinship.parentIdsOf(person, ids, unions, extraParents)
 
         val sameGenUnions = FamilyKinship.sameGenerationUnions(unions, ids, generation)
         fun unionsOf(id: String): List<UnionEntity> =
             sameGenUnions.filter { it.partnerAId == id || it.partnerBId == id }
 
         fun belongsToUnion(person: PersonEntity, union: UnionEntity): Boolean =
-            FamilyKinship.belongsToUnion(person, union, ids, extraParents)
+            FamilyKinship.belongsToUnion(person, union, ids, unions, extraParents)
 
         fun childrenOfUnion(union: UnionEntity): List<PersonEntity> =
-            FamilyKinship.childrenOfUnion(people, union, ids, extraParents)
+            FamilyKinship.childrenOfUnion(people, union, ids, unions, extraParents)
 
         fun singleChildrenOf(id: String): List<PersonEntity> =
             people.filter { child ->
@@ -60,6 +61,7 @@ internal object SugiyamaFamilyLayout {
             byId = byId,
             ids = ids,
             extraParents = extraParents,
+            unions = unions,
             homePersonId = homePersonId,
             unionsOf = ::unionsOf,
             childrenOfUnion = ::childrenOfUnion,
@@ -106,7 +108,11 @@ internal object SugiyamaFamilyLayout {
         cardW: Float,
         gapX: Float,
     ) {
-        val spousePairs = sameGenUnions.map { setOf(it.partnerAId, it.partnerBId) }.toSet()
+        val spousePairs = sameGenUnions.mapNotNull { u ->
+            val a = u.partnerAId ?: return@mapNotNull null
+            val b = u.partnerBId ?: return@mapNotNull null
+            setOf(a, b)
+        }.toSet()
         fun shiftBlock(id: String, delta: Float) {
             if (delta == 0f) return
             val partners = spousePairs.firstOrNull { id in it }?.toList() ?: listOf(id)
@@ -142,6 +148,7 @@ internal object SugiyamaFamilyLayout {
         private val byId: Map<String, PersonEntity>,
         private val ids: Set<String>,
         private val extraParents: Map<String, List<String>>,
+        private val unions: List<UnionEntity>,
         private val homePersonId: String?,
         private val unionsOf: (String) -> List<UnionEntity>,
         private val childrenOfUnion: (UnionEntity) -> List<PersonEntity>,
@@ -191,19 +198,25 @@ internal object SugiyamaFamilyLayout {
                 union = union,
                 byId = byId,
                 ids = ids,
+                unions = unions,
                 extraParents = extraParents,
-                parentColumnCenter = { partnerId ->
-                    val parents = FamilyKinship.parentIdsOf(byId.getValue(partnerId), ids, extraParents)
-                    if (parents.isEmpty()) return@leftPartnerId null
+                parentColumnCenter = parentColumnCenter@{ partnerId ->
+                    val parents = FamilyKinship.parentIdsOf(byId.getValue(partnerId), ids, unions, extraParents)
+                    if (parents.isEmpty()) return@parentColumnCenter null
                     parents.mapNotNull { parentId -> leftOf[parentId]?.plus(cardW / 2f) }.takeIf { it.size == parents.size }
                         ?.average()?.toFloat()
                 },
                 homePersonId = homePersonId,
             )
             val rightId = FamilyKinship.otherPartner(union, leftId)
-            leftOf[leftId] = center - gapX / 2f - cardW
-            leftOf[rightId] = center + gapX / 2f
-            cursor = max(cursor, leftOf.getValue(rightId) + cardW + siblingGap)
+            if (rightId == null) {
+                leftOf[leftId] = center - cardW / 2f
+                cursor = max(cursor, leftOf.getValue(leftId) + cardW + siblingGap)
+            } else {
+                leftOf[leftId] = center - gapX / 2f - cardW
+                leftOf[rightId] = center + gapX / 2f
+                cursor = max(cursor, leftOf.getValue(rightId) + cardW + siblingGap)
+            }
             return center
         }
 

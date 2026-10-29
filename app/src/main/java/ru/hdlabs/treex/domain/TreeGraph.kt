@@ -21,9 +21,17 @@ fun treeComponents(
         }
     }
     unions.forEach { union ->
-        if (union.partnerAId in ids && union.partnerBId in ids && union.partnerAId != union.partnerBId) {
-            neighbors.getValue(union.partnerAId).add(union.partnerBId)
-            neighbors.getValue(union.partnerBId).add(union.partnerAId)
+        union.childIdsList().filter { it in ids }.forEach { childId ->
+            union.partnerIds().filter { it in ids }.forEach { parentId ->
+                neighbors.getValue(childId).add(parentId)
+                neighbors.getValue(parentId).add(childId)
+            }
+        }
+        val a = union.partnerAId
+        val b = union.partnerBId
+        if (a != null && b != null && a in ids && b in ids && a != b) {
+            neighbors.getValue(a).add(b)
+            neighbors.getValue(b).add(a)
         }
     }
     val seen = mutableSetOf<String>()

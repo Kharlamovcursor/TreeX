@@ -15,15 +15,26 @@ object TreeIntegrity {
 
     fun livingUnions(unions: List<UnionEntity>, people: List<PersonEntity>): List<UnionEntity> {
         val byId = people.associateBy { it.id }
+        val living = livingIds(people)
         return unions.filter { union ->
-            val a = byId[union.partnerAId]
-            val b = byId[union.partnerBId]
-            a != null && b != null && isLiving(a) && isLiving(b)
+            val partners = union.partnerIds().filter { it in living }
+            val children = union.childIdsList().filter { it in living }
+            when {
+                partners.size >= 2 -> partners.all { id -> byId[id]?.let { isLiving(it) } == true }
+                partners.size == 1 && children.isNotEmpty() ->
+                    byId[partners.single()]?.let { isLiving(it) } == true
+                else -> false
+            }
         }
     }
 
-    fun livingParentIds(person: PersonEntity, living: Set<String>, byId: Map<String, PersonEntity>): List<String> =
-        listOfNotNull(person.fatherId, person.motherId)
+    fun livingParentIds(
+        person: PersonEntity,
+        living: Set<String>,
+        byId: Map<String, PersonEntity>,
+        unions: List<UnionEntity> = emptyList(),
+    ): List<String> =
+        UnionEr.parentIdsOf(person, living, unions)
             .filter { it in living && isLiving(byId.getValue(it)) }
 
     /** Clears parent pointers that point at vacant or missing people. */

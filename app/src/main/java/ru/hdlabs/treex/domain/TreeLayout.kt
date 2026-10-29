@@ -62,8 +62,10 @@ object TreeLayout {
         openLinks: List<OpenLink> = emptyList(),
     ): Map<String, Int> {
         if (people.isEmpty()) return emptyMap()
+        val reconciled = UnionEr.reconcileChildMembership(people, unions)
         val byId = people.associateBy { it.id }
         val living = TreeIntegrity.livingIds(people)
+        val ids = living
         val generation = HashMap<String, Int>()
         val visiting = HashSet<String>()
 
@@ -71,7 +73,7 @@ object TreeLayout {
             generation[id]?.let { return it }
             if (!visiting.add(id)) return 0
             val person = byId[id]
-            val parents = listOfNotNull(person?.fatherId, person?.motherId)
+            val parents = person?.let { UnionEr.parentIdsOf(it, ids, reconciled) }.orEmpty()
                 .filter { it in living && it in byId && it != id }
             val value = if (parents.isEmpty()) 0 else parents.maxOf { depth(it) } + 1
             visiting.remove(id)
@@ -82,14 +84,13 @@ object TreeLayout {
 
         fun hasParents(id: String): Boolean {
             val person = byId[id] ?: return false
-            return (person.fatherId != null && person.fatherId in byId) ||
-                (person.motherId != null && person.motherId in byId)
+            return UnionEr.parentIdsOf(person, ids, reconciled).any { it in byId }
         }
 
         repeat(people.size + unions.size + 4) {
             var changed = false
             people.forEach { person ->
-                val parentGenerations = listOfNotNull(person.fatherId, person.motherId)
+                val parentGenerations = UnionEr.parentIdsOf(person, ids, reconciled)
                     .filter { it in living && it in byId && it != person.id }
                     .map { generation.getValue(it) }
                 if (parentGenerations.isNotEmpty()) {
@@ -100,13 +101,15 @@ object TreeLayout {
                     }
                 }
             }
-            unions.forEach { union ->
-                if (union.partnerAId !in byId || union.partnerBId !in byId) return@forEach
-                val generationA = generation.getValue(union.partnerAId)
-                val generationB = generation.getValue(union.partnerBId)
+            reconciled.forEach { union ->
+                val a = union.partnerAId ?: return@forEach
+                val b = union.partnerBId ?: return@forEach
+                if (a !in byId || b !in byId) return@forEach
+                val generationA = generation.getValue(a)
+                val generationB = generation.getValue(b)
                 if (generationA == generationB) return@forEach
-                val parentsA = hasParents(union.partnerAId)
-                val parentsB = hasParents(union.partnerBId)
+                val parentsA = hasParents(a)
+                val parentsB = hasParents(b)
                 val shared = when {
                     !parentsA && parentsB -> generationB
                     parentsA && !parentsB -> generationA
@@ -114,17 +117,17 @@ object TreeLayout {
                     else -> maxOf(generationA, generationB)
                 }
                 if (generationA != shared) {
-                    generation[union.partnerAId] = shared
+                    generation[a] = shared
                     changed = true
                 }
                 if (generationB != shared) {
-                    generation[union.partnerBId] = shared
+                    generation[b] = shared
                     changed = true
                 }
             }
             people.forEach { person ->
                 val childGen = generation[person.id] ?: return@forEach
-                listOfNotNull(person.fatherId, person.motherId).forEach { parentId ->
+                UnionEr.parentIdsOf(person, ids, reconciled).forEach { parentId ->
                     if (parentId !in byId) return@forEach
                     val target = childGen - 1
                     if ((generation[parentId] ?: 0) < target) {
@@ -174,7 +177,8 @@ object TreeLayout {
         if (people.isEmpty()) return TreePlacement(emptyList(), emptyList(), emptyList(), 0f, 0f)
         val livingPeople = TreeIntegrity.livingPeople(people)
         if (livingPeople.isEmpty()) return TreePlacement(emptyList(), emptyList(), emptyList(), 0f, 0f)
-        val livingUnions = TreeIntegrity.livingUnions(unions, people)
+        val reconciledUnions = UnionEr.reconcileChildMembership(people, unions)
+        val livingUnions = TreeIntegrity.livingUnions(reconciledUnions, people)
         val byId = people.associateBy { it.id }
         val heights = livingPeople.associate { it.id to cardHeight(it) }
         val generation = generationMap(livingPeople, livingUnions, openLinks)
@@ -196,39 +200,39 @@ object TreeLayout {
             val gen = generation[node.id] ?: 0
             TreeCard(node.id, node.left, node.top, rowHeight[gen] ?: node.height)
         }
-        val childGroups = childGroupsOf(livingPeople, cards, openLinks, byId)
-        val spouseLinks = livingUnions.map { it.partnerAId to it.partnerBId }.distinct()
+        val placedIds = cards.map { it.id }.toSet()
+        val childGroups = UnionEr.childGroupsFromUnions(livingUnions, placedIds, livingPeople) +
+            childGroupsFromOpenLinks(livingPeople, cards, openLinks, byId, reconciledUnions)
+        val livingIds = livingPeople.map { it.id }.toSet()
+        val spouseLinks = livingUnions.filter { it.hasBothPartners() }.mapNotNull { u ->
+            val a = u.partnerAId ?: return@mapNotNull null
+            val b = u.partnerBId ?: return@mapNotNull null
+            if (a !in livingIds || b !in livingIds) return@mapNotNull null
+            a to b
+        }.distinct()
         val width = (cards.maxOfOrNull { it.left + CARD_W } ?: PAD) + PAD
         val height = (cards.maxOfOrNull { it.top + it.height } ?: PAD) + PAD
         val knots = openLinks.mapNotNull { link -> knotFor(link, cards) }
         return TreePlacement(cards, spouseLinks, childGroups, width, height, knots)
     }
 
-    private fun childGroupsOf(
+    private fun childGroupsFromOpenLinks(
         people: List<PersonEntity>,
         cards: List<TreeCard>,
         openLinks: List<OpenLink>,
         byId: Map<String, PersonEntity>,
+        unions: List<UnionEntity>,
     ): List<ChildGroup> {
         val placed = cards.map { it.id }.toSet()
-        val groups = mutableListOf<ChildGroup>()
-        people.filter { it.id in placed }.groupBy { person ->
-            TreeIntegrity.livingParentIds(person, placed, byId).sorted()
-        }.forEach { (parents, children) ->
-            if (parents.isNotEmpty()) {
-                groups += ChildGroup(parents, children.map { it.id })
-            }
-        }
-        openLinks.filter { it.slot == "bridge" && it.anchorId in placed }.forEach { link ->
+        val ids = placed
+        return openLinks.filter { it.slot == "bridge" && it.anchorId in placed }.mapNotNull { link ->
             val childIds = link.childIds.filter { childId ->
                 val child = people.find { it.id == childId } ?: return@filter false
-                childId in placed && child.fatherId != link.anchorId && child.motherId != link.anchorId
+                if (childId !in placed) return@filter false
+                link.anchorId !in UnionEr.parentIdsOf(child, ids, unions)
             }
-            if (childIds.isNotEmpty()) {
-                groups += ChildGroup(listOf(link.anchorId), childIds, open = true)
-            }
+            if (childIds.isEmpty()) null else ChildGroup(listOf(link.anchorId), childIds, open = true)
         }
-        return groups
     }
 
     private fun knotFor(link: OpenLink, cards: List<TreeCard>): OpenKnot? {

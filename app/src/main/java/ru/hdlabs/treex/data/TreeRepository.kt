@@ -40,6 +40,10 @@ import ru.hdlabs.treex.domain.SpouseDraft
 import ru.hdlabs.treex.domain.TreeRules
 import ru.hdlabs.treex.domain.siblingsMissingParent
 import ru.hdlabs.treex.domain.TreeIntegrity
+import ru.hdlabs.treex.domain.UnionEr
+import ru.hdlabs.treex.domain.UnionErAttach
+import ru.hdlabs.treex.domain.childIdsList
+import ru.hdlabs.treex.domain.partnerIds
 import ru.hdlabs.treex.domain.mergePerson
 import ru.hdlabs.treex.domain.mergeSpouseDrafts
 import ru.hdlabs.treex.domain.spouseDraftsOf
@@ -114,7 +118,7 @@ class TreeRepository(
                 val people = peopleDao.all()
                 val current = unionDao.all()
                 val merged = mergeInferredParentUnions(current, people)
-                if (merged.size != current.size) {
+                if (merged != current) {
                     unionDao.deleteAll()
                     unionDao.upsertAll(merged)
                     generation += 1
@@ -185,32 +189,35 @@ class TreeRepository(
                 }
                 val linkRole = attach?.role?.takeIf { anchor != null }
                 val clean = when (linkRole) {
-                    "sister", "brother" -> {
-                        val host = anchor ?: baseClean
-                        val inheritedFather = host.fatherId?.takeIf { it in knownIds && it != baseClean.id }
-                        val inheritedMother = host.motherId?.takeIf { it in knownIds && it != baseClean.id && it != inheritedFather }
-                        baseClean.copy(
-                            gender = if (linkRole == "sister") "f" else "m",
-                            fatherId = inheritedFather ?: baseClean.fatherId,
-                            motherId = inheritedMother ?: baseClean.motherId,
-                        )
+                    "sister", "brother" -> baseClean.copy(
+                        gender = if (linkRole == "sister") "f" else "m",
+                        fatherId = null,
+                        motherId = null,
+                    )
+                    else -> baseClean.copy(fatherId = null, motherId = null)
+                }
+                val unionSnapshot = UnionEr.reconcileChildMembership(existing, unionDao.all())
+                val projectedUnions = if (linkRole != null && anchor != null) {
+                    UnionErAttach.applyRelativeAttach(existing, unionSnapshot, anchor.id, linkRole, clean)
+                } else {
+                    unionSnapshot
+                }
+                val parentMap = UnionEr.parentPairsMap(existing + clean, projectedUnions)
+                val pair = parentMap[clean.id] ?: (null to null)
+                if (TreeRules.createsCycle(parentMap, clean.id, pair.first, pair.second)) {
+                    throw IllegalArgumentException("Такая связь замыкает круг в древе")
+                }
+                if (linkRole == "father" && anchor != null) {
+                    val anchorPair = parentMap[anchor.id] ?: (null to null)
+                    if (TreeRules.createsCycle(parentMap, anchor.id, clean.id, anchorPair.second)) {
+                        throw IllegalArgumentException("Такая связь замыкает круг в древе")
                     }
-                    else -> baseClean
                 }
-                val parents = existing.associate { it.id to (it.fatherId to it.motherId) }.toMutableMap()
-                parents[clean.id] = clean.fatherId to clean.motherId
-                if (TreeRules.createsCycle(parents, clean.id, clean.fatherId, clean.motherId)) {
-                    throw IllegalArgumentException("Такая связь замыкает круг в древе")
-                }
-                if (linkRole == "father" && anchor != null &&
-                    TreeRules.createsCycle(parents, anchor.id, clean.id, anchor.motherId)
-                ) {
-                    throw IllegalArgumentException("Такая связь замыкает круг в древе")
-                }
-                if (linkRole == "mother" && anchor != null &&
-                    TreeRules.createsCycle(parents, anchor.id, anchor.fatherId, clean.id)
-                ) {
-                    throw IllegalArgumentException("Такая связь замыкает круг в древе")
+                if (linkRole == "mother" && anchor != null) {
+                    val anchorPair = parentMap[anchor.id] ?: (null to null)
+                    if (TreeRules.createsCycle(parentMap, anchor.id, anchorPair.first, clean.id)) {
+                        throw IllegalArgumentException("Такая связь замыкает круг в древе")
+                    }
                 }
                 val previousSpouses = spouseDraftsOf(unionDao.all(), clean.id).sortedBy { it.personId }
                 val formSpouses = (spouses + listOfNotNull(
@@ -223,8 +230,10 @@ class TreeRepository(
                     replace = previous == null || !preserveUntouched || "spouses" in touched,
                 ).sortedBy { it.personId }
                 val anchorAlreadyLinked = when (linkRole) {
-                    "father" -> anchor?.fatherId == clean.id
-                    "mother" -> anchor?.motherId == clean.id
+                    "father", "mother" -> {
+                        val childUnion = anchor?.let { UnionEr.findParentUnionForChild(projectedUnions, it.id) }
+                        childUnion?.partnerIds()?.contains(clean.id) == true
+                    }
                     else -> true
                 }
                 if (previous != null && sameContent(previous, clean) && previousSpouses == nextSpouses && anchorAlreadyLinked) {
@@ -240,29 +249,20 @@ class TreeRepository(
                             updatedAtMillis = now,
                         ),
                     )
-                    if (linkRole == "father" && anchor != null) {
-                        peopleDao.upsert(anchor.copy(fatherId = clean.id, updatedAtMillis = now))
-                        if (anchor.fatherId == null) {
-                            siblingsMissingParent(peopleDao.all(), anchor, clean.id, asFather = true).forEach { sibling ->
-                                peopleDao.upsert(sibling.copy(fatherId = clean.id, updatedAtMillis = now))
-                            }
-                        }
+                    val kept = unionDao.all().filter {
+                        it.partnerAId != clean.id && it.partnerBId != clean.id
                     }
-                    if (linkRole == "mother" && anchor != null) {
-                        peopleDao.upsert(anchor.copy(motherId = clean.id, updatedAtMillis = now))
-                        if (anchor.motherId == null) {
-                            siblingsMissingParent(peopleDao.all(), anchor, clean.id, asFather = false).forEach { sibling ->
-                                peopleDao.upsert(sibling.copy(motherId = clean.id, updatedAtMillis = now))
-                            }
-                        }
-                    }
-                    val kept = unionDao.all().filter { it.partnerAId != clean.id && it.partnerBId != clean.id }
                     val created = nextSpouses.map { spouse ->
                         val a = minOf(clean.id, spouse.personId)
                         val b = maxOf(clean.id, spouse.personId)
-                        UnionEntity("u-$a-$b", a, b, spouse.marriedOn.trim())
+                        UnionEntity(id = stableUnionId(a, b), partnerAId = a, partnerBId = b, marriedOn = spouse.marriedOn.trim())
                     }
-                    val unionsWithParents = mergeInferredParentUnions(kept + created, peopleDao.all())
+                    val afterAttach = if (linkRole != null && anchor != null) {
+                        UnionErAttach.applyRelativeAttach(peopleDao.all(), kept + created, anchor.id, linkRole, clean)
+                    } else {
+                        kept + created
+                    }
+                    val unionsWithParents = mergeInferredParentUnions(afterAttach, peopleDao.all())
                     unionDao.deleteAll()
                     unionDao.upsertAll(unionsWithParents)
                     generation += 1
@@ -327,7 +327,7 @@ class TreeRepository(
             ),
         )
         val vacancyLinks = unionDao.all().mapNotNull { union ->
-            val partners = setOf(union.partnerAId, union.partnerBId)
+            val partners = union.partnerIds().toSet()
             if (removed.id !in partners) return@mapNotNull null
             val other = partners.first { it != removed.id }
             OpenLink(
@@ -848,7 +848,16 @@ class TreeRepository(
 
     private suspend fun readLocked(): TreeDocument = TreeDocument(
         people = peopleDao.all().map { it.toRecord() },
-        unions = unionDao.all().map { UnionRecord(it.id, it.partnerAId, it.partnerBId, it.marriedOn) },
+        unions = unionDao.all().map {
+            UnionRecord(
+                id = it.id,
+                partnerAId = it.partnerAId,
+                partnerBId = it.partnerBId,
+                marriedOn = it.marriedOn,
+                childIds = it.childIdsList(),
+                unionType = it.unionType,
+            )
+        },
     )
 
     private suspend fun replaceLocked(document: TreeDocument) {
@@ -857,7 +866,18 @@ class TreeRepository(
             peopleDao.deleteAll()
             unionDao.deleteAll()
             peopleDao.upsertAll(normalized.people.map { it.toEntity() })
-            unionDao.upsertAll(normalized.unions.map { UnionEntity(it.id, it.partnerAId, it.partnerBId, it.marriedOn) })
+            val entities = normalized.people.map { it.toEntity() }
+            val rawUnions = normalized.unions.map {
+                UnionEntity(
+                    id = it.id,
+                    partnerAId = it.partnerAId,
+                    partnerBId = it.partnerBId,
+                    marriedOn = it.marriedOn,
+                    childIds = it.childIds.joinToString(","),
+                    unionType = it.unionType,
+                )
+            }
+            unionDao.upsertAll(UnionEr.reconcileChildMembership(entities, rawUnions))
         }
         pruneOpenLinks(normalized.people.map { it.id }.toSet())
     }

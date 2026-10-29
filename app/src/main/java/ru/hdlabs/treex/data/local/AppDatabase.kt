@@ -13,7 +13,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
  */
 @Database(
     entities = [PersonEntity::class, UnionEntity::class],
-    version = 3,
+    version = 4,
     exportSchema = false,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -34,6 +34,31 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        private val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS unions_new (
+                        id TEXT NOT NULL PRIMARY KEY,
+                        partnerAId TEXT,
+                        partnerBId TEXT,
+                        marriedOn TEXT NOT NULL DEFAULT '',
+                        childIds TEXT NOT NULL DEFAULT '',
+                        unionType TEXT NOT NULL DEFAULT 'marriage'
+                    )
+                    """.trimIndent(),
+                )
+                db.execSQL(
+                    """
+                    INSERT INTO unions_new (id, partnerAId, partnerBId, marriedOn, childIds, unionType)
+                    SELECT id, partnerAId, partnerBId, marriedOn, '', 'marriage' FROM unions
+                    """.trimIndent(),
+                )
+                db.execSQL("DROP TABLE unions")
+                db.execSQL("ALTER TABLE unions_new RENAME TO unions")
+            }
+        }
+
         @Volatile
         private var instance: AppDatabase? = null
 
@@ -43,7 +68,7 @@ abstract class AppDatabase : RoomDatabase() {
                     context.applicationContext,
                     AppDatabase::class.java,
                     "treex.db",
-                ).addMigrations(MIGRATION_1_2, MIGRATION_2_3).build().also { instance = it }
+                ).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4).build().also { instance = it }
             }
     }
 }

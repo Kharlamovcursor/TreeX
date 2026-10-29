@@ -161,12 +161,12 @@ fun transferVacantSlot(
         updates += next
     }
     val nextUnions = unions.mapNotNull { union ->
-        val partners = setOf(union.partnerAId, union.partnerBId)
+        val partners = union.partnerIds().toSet()
         when {
             vacantId !in partners -> union
             targetId in partners -> null
             else -> {
-                val other = if (union.partnerAId == vacantId) union.partnerBId else union.partnerAId
+                val other = partners.first { it != vacantId }
                 union.copy(
                     id = stableUnionId(minOf(targetId, other), maxOf(targetId, other)),
                     partnerAId = minOf(targetId, other),

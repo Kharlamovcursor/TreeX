@@ -12,7 +12,7 @@ data class TreeDocument(
 ) {
     companion object {
         const val FORMAT = "hdlabs-tree"
-        const val VERSION = 1
+        const val VERSION = 2
     }
 }
 
@@ -41,7 +41,9 @@ data class PersonRecord(
 @Serializable
 data class UnionRecord(
     val id: String,
-    val partnerAId: String,
-    val partnerBId: String,
+    val partnerAId: String? = null,
+    val partnerBId: String? = null,
     val marriedOn: String = "",
+    val childIds: List<String> = emptyList(),
+    val unionType: String = "marriage",
 )

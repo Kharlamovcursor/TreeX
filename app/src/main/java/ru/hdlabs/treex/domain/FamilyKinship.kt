@@ -5,18 +5,16 @@ import ru.hdlabs.treex.data.local.UnionEntity
 import kotlin.math.abs
 
 /**
- * Genealogical structure only: parents, unions, children, sibling order.
- * No card coordinates — layout consumes this model.
+ * Genealogical structure: Person → Union → children.
+ * Layout consumes this model only — never infers kinship from pixels.
  */
 internal object FamilyKinship {
     fun parentIdsOf(
         person: PersonEntity,
         ids: Set<String>,
+        unions: List<UnionEntity>,
         extraParents: Map<String, List<String>> = emptyMap(),
-    ): List<String> =
-        (listOfNotNull(person.fatherId, person.motherId) + extraParents[person.id].orEmpty())
-            .filter { it in ids && it != person.id }
-            .distinct()
+    ): List<String> = UnionEr.parentIdsOf(person, ids, unions, extraParents)
 
     fun sameGenerationUnions(
         unions: List<UnionEntity>,
@@ -24,19 +22,23 @@ internal object FamilyKinship {
         generation: Map<String, Int>,
     ): List<UnionEntity> =
         unions.filter {
-            it.partnerAId in ids && it.partnerBId in ids && it.partnerAId != it.partnerBId &&
-                generation[it.partnerAId] == generation[it.partnerBId]
+            val a = it.partnerAId
+            val b = it.partnerBId
+            a != null && b != null && a in ids && b in ids && a != b &&
+                generation[a] == generation[b]
         }
 
     fun belongsToUnion(
         person: PersonEntity,
         union: UnionEntity,
         ids: Set<String>,
+        unions: List<UnionEntity>,
         extraParents: Map<String, List<String>>,
     ): Boolean {
-        val parents = parentIdsOf(person, ids, extraParents)
+        if (person.id in union.childIdsList()) return true
+        val parents = parentIdsOf(person, ids, unions, extraParents)
         if (parents.isEmpty()) return false
-        val partners = setOf(union.partnerAId, union.partnerBId)
+        val partners = union.partnerIds().toSet()
         return parents.all { it in partners }
     }
 
@@ -44,9 +46,13 @@ internal object FamilyKinship {
         people: List<PersonEntity>,
         union: UnionEntity,
         ids: Set<String>,
+        unions: List<UnionEntity>,
         extraParents: Map<String, List<String>>,
-    ): List<PersonEntity> =
-        people.filter { belongsToUnion(it, union, ids, extraParents) }
+    ): List<PersonEntity> {
+        val explicit = union.childIdsList().filter { it in ids }.mapNotNull { id -> people.find { it.id == id } }
+        if (explicit.isNotEmpty()) return explicit
+        return people.filter { belongsToUnion(it, union, ids, unions, extraParents) }
+    }
 
     fun orderSiblings(
         children: List<PersonEntity>,
@@ -58,24 +64,29 @@ internal object FamilyKinship {
         return singles + married
     }
 
-    fun otherPartner(union: UnionEntity, id: String): String =
-        if (union.partnerAId == id) union.partnerBId else union.partnerAId
+    fun otherPartner(union: UnionEntity, id: String): String? =
+        when (id) {
+            union.partnerAId -> union.partnerBId
+            union.partnerBId -> union.partnerAId
+            else -> null
+        }
 
     fun leftPartnerId(
         union: UnionEntity,
         byId: Map<String, PersonEntity>,
         ids: Set<String>,
+        unions: List<UnionEntity>,
         extraParents: Map<String, List<String>>,
         parentColumnCenter: (String) -> Float?,
         homePersonId: String?,
     ): String {
-        val a = union.partnerAId
-        val b = union.partnerBId
+        val a = union.partnerAId ?: return union.partnerBId ?: union.id
+        val b = union.partnerBId ?: return a
         val home = homePersonId?.takeIf { it in byId }
         if (home == a || home == b) return home
 
         fun column(id: String): Float? {
-            val parents = parentIdsOf(byId.getValue(id), ids, extraParents)
+            val parents = parentIdsOf(byId.getValue(id), ids, unions, extraParents)
             if (parents.isEmpty()) return null
             val xs = parents.mapNotNull(parentColumnCenter)
             if (xs.size != parents.size) return null
@@ -90,6 +101,6 @@ internal object FamilyKinship {
         if (columnA != null && columnB == null) return a
         if (columnB != null && columnA == null) return b
 
-        return union.partnerAId
+        return a
     }
 }
