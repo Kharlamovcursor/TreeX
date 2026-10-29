@@ -45,7 +45,7 @@ object RelativesTreeConverter {
                 groups.half.map { RelativesRelation(it.id, HALF) }
         }
 
-        return living.map { person ->
+        val raw = living.map { person ->
             RelativesGraphNode(
                 id = person.id,
                 gender = toLibraryGender(person.gender),
@@ -54,6 +54,57 @@ object RelativesTreeConverter {
                 siblings = siblingsOf(person),
                 spouses = spousesOf(person.id),
             )
+        }
+        return normalizeForRelativesTree(raw)
+    }
+
+    /**
+     * relatives-tree draws child connectors only when **every** parent in a couple lists the same
+     * child in [RelativesGraphNode.children] (see bundled calc-tree.js / connectors/children.js).
+     * Room unions + fatherId/motherId can leave one parent with an empty children list — fix here.
+     */
+    internal fun normalizeForRelativesTree(nodes: List<RelativesGraphNode>): List<RelativesGraphNode> {
+        if (nodes.isEmpty()) return nodes
+        val order = nodes.map { it.id }
+        val idSet = order.toSet()
+
+        fun bloodChildIds(n: RelativesGraphNode): MutableSet<String> =
+            n.children.filter { it.type == BLOOD && it.id in idSet }.map { it.id }.toMutableSet()
+
+        fun bloodParentIds(n: RelativesGraphNode): MutableSet<String> =
+            n.parents.filter { it.type == BLOOD && it.id in idSet }.map { it.id }.toMutableSet()
+
+        val childIdsByParent = order.associateWith { id -> bloodChildIds(nodes.first { it.id == id }) }.toMutableMap()
+        val parentIdsByChild = order.associateWith { id -> bloodParentIds(nodes.first { it.id == id }) }.toMutableMap()
+
+        nodes.forEach { n ->
+            n.parents.filter { it.type == BLOOD && it.id in idSet }.forEach { p ->
+                childIdsByParent.getOrPut(p.id) { mutableSetOf() }.add(n.id)
+                parentIdsByChild.getOrPut(n.id) { mutableSetOf() }.add(p.id)
+            }
+            n.children.filter { it.type == BLOOD && it.id in idSet }.forEach { c ->
+                childIdsByParent.getOrPut(n.id) { mutableSetOf() }.add(c.id)
+                parentIdsByChild.getOrPut(c.id) { mutableSetOf() }.add(n.id)
+            }
+        }
+
+        val spouseLinks = mutableMapOf<String, MutableList<RelativesRelation>>()
+        nodes.forEach { n ->
+            n.spouses.filter { it.id in idSet }.forEach { s ->
+                spouseLinks.getOrPut(n.id) { mutableListOf() }.add(s)
+                spouseLinks.getOrPut(s.id) { mutableListOf() }
+                    .add(RelativesRelation(n.id, s.type))
+            }
+        }
+
+        return order.map { id ->
+            val n = nodes.first { it.id == id }
+            val children = childIdsByParent[id].orEmpty().sorted().map { RelativesRelation(it, BLOOD) } +
+                n.children.filter { it.type != BLOOD }
+            val parents = parentIdsByChild[id].orEmpty().sorted().map { RelativesRelation(it, BLOOD) } +
+                n.parents.filter { it.type != BLOOD }
+            val spouses = spouseLinks[id]?.distinctBy { it.id }.orEmpty().ifEmpty { n.spouses }
+            n.copy(children = children, parents = parents, spouses = spouses)
         }
     }
 

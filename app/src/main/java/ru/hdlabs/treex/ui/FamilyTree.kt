@@ -13,8 +13,6 @@ import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.gestures.awaitEachGesture
-import androidx.compose.foundation.gestures.calculateCentroid
 import androidx.compose.foundation.gestures.calculatePan
 import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -173,7 +171,7 @@ fun FamilyTree(
             Modifier
                 .fillMaxSize()
                 .clipToBounds()
-                .treeTransform { zoom, pan, centroid ->
+                .treeViewportTransform { zoom, pan, centroid ->
                     val minScale = min(0.35f, fit).coerceAtLeast(0.12f)
                     val next = (scaleAnim.value * zoom).coerceIn(minScale, 2.6f)
                     val applied = if (scaleAnim.value == 0f) 1f else next / scaleAnim.value
@@ -640,41 +638,3 @@ private fun GenderFrame(
     }
 }
 
-private fun Modifier.treeTransform(
-    onGesture: (zoom: Float, pan: Offset, centroid: Offset) -> Unit,
-): Modifier = pointerInput(Unit) {
-    val slop = viewConfiguration.touchSlop
-    awaitEachGesture {
-        var panning = false
-        var accumulated = Offset.Zero
-        while (true) {
-            val event = awaitPointerEvent(PointerEventPass.Initial)
-            val pressed = event.changes.filter { it.pressed }
-            if (pressed.isEmpty()) break
-            if (pressed.size >= 2) {
-                val zoom = event.calculateZoom()
-                val pan = event.calculatePan()
-                val centroid = event.calculateCentroid()
-                if (abs(zoom - 1f) > 0.001f || pan.getDistance() > 0.5f) {
-                    onGesture(zoom, pan, centroid)
-                    event.changes.forEach { change -> change.consume() }
-                }
-                panning = true
-            } else {
-                val change = pressed.first()
-                val delta = change.position - change.previousPosition
-                if (!panning) {
-                    accumulated += delta
-                    if (accumulated.getDistance() > slop) {
-                        panning = true
-                        onGesture(1f, accumulated, change.position)
-                        change.consume()
-                    }
-                } else {
-                    onGesture(1f, delta, change.position)
-                    change.consume()
-                }
-            }
-        }
-    }
-}

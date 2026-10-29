@@ -23,7 +23,7 @@ import ru.hdlabs.treex.domain.yearsLabel
 import kotlin.math.max
 import kotlin.math.min
 
-/** Static bitmap of the whole tree layout (all cards + links) for debug uploads. */
+/** Static bitmap of the native [TreeLayout] (not relatives-tree WebView) for debug uploads. */
 object TreeSnapshotRenderer {
     private const val MAX_EDGE_PX = 4096
 
