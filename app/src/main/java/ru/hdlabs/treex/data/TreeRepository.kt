@@ -1,7 +1,6 @@
 package ru.hdlabs.treex.data
 
 import android.content.Context
-import kotlin.DeprecationLevel
 import androidx.room.withTransaction
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -26,39 +25,24 @@ import ru.hdlabs.treex.backup.TreeDocument
 import ru.hdlabs.treex.backup.UnionRecord
 import ru.hdlabs.treex.data.local.AppDatabase
 import ru.hdlabs.treex.data.local.PersonEntity
-import ru.hdlabs.treex.data.local.UnionEntity
+import ru.hdlabs.treex.backup.partnerIds
 import ru.hdlabs.treex.data.settings.SettingsRepository
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import ru.hdlabs.treex.domain.OpenLink
-import ru.hdlabs.treex.domain.RelativeAttach
 import ru.hdlabs.treex.domain.linksAfterRemoval
 import ru.hdlabs.treex.domain.reattachPeople
 import ru.hdlabs.treex.domain.reattachSpouse
 import ru.hdlabs.treex.domain.transferVacantSlot
-import ru.hdlabs.treex.domain.mergeInferredParentUnions
 import ru.hdlabs.treex.domain.stableUnionId
-import ru.hdlabs.treex.domain.SpouseDraft
-import ru.hdlabs.treex.domain.TreeRules
 import ru.hdlabs.treex.domain.DataIssue
 import ru.hdlabs.treex.domain.DeletePersonImpact
-import ru.hdlabs.treex.domain.FamilyTreeMutations
-import ru.hdlabs.treex.domain.KinshipPersistence
 import ru.hdlabs.treex.data.kinship.ParentRole
 import ru.hdlabs.treex.domain.TreeDataValidator
 import ru.hdlabs.treex.domain.TreeIntegrity
-import ru.hdlabs.treex.domain.UnionEr
-import ru.hdlabs.treex.domain.UnionErAttach
 import ru.hdlabs.treex.domain.graph.GenealogyGraph
 import ru.hdlabs.treex.domain.graph.GenealogyGraphMapper
-import ru.hdlabs.treex.domain.familyTreeStateFrom
 import ru.hdlabs.treex.domain.fullName
-import ru.hdlabs.treex.domain.hasBothPartners
-import ru.hdlabs.treex.domain.toUnionEntity
-import ru.hdlabs.treex.domain.childIdsList
-import ru.hdlabs.treex.domain.partnerIds
-import ru.hdlabs.treex.domain.mergePerson
-import ru.hdlabs.treex.domain.mergeSpouseDrafts
 import ru.hdlabs.treex.domain.spouseDraftsOf
 import ru.hdlabs.treex.domain.acceptsAsParent
 import ru.hdlabs.treex.domain.BranchConnectMode
@@ -83,7 +67,7 @@ import java.time.ZoneId
 
 data class TreeState(
     val people: List<PersonEntity> = emptyList(),
-    val unions: List<UnionEntity> = emptyList(),
+    val unions: List<UnionRecord> = emptyList(),
     val families: List<ru.hdlabs.treex.data.local.FamilyEntity> = emptyList(),
     val familyChildren: List<ru.hdlabs.treex.data.local.FamilyChildEntity> = emptyList(),
 )
@@ -146,7 +130,7 @@ class TreeRepository(
     ) { people, families, familyChildren ->
         TreeState(
             people = people,
-            unions = FamilyBackupMapper.toUnionEntities(families, familyChildren),
+            unions = FamilyBackupMapper.toUnionRecords(families, familyChildren),
             families = families,
             familyChildren = familyChildren,
         )
@@ -155,20 +139,7 @@ class TreeRepository(
     suspend fun person(id: String): PersonEntity? = peopleDao.get(id)
 
     /** Добавляет союзы между отцом и матерью, если у ребёнка указаны оба родителя, а брака в базе нет. */
-    suspend fun reconcileParentUnions() {
-        mutex.withLock {
-            database.withTransaction {
-                val people = peopleDao.all()
-                val current = loadUnionProjection()
-                val merged = UnionEr.compactUnions(people, mergeInferredParentUnions(current, people))
-                if (merged != current) {
-                    persistUnionProjection(merged)
-                    generation += 1
-                    schedulePush()
-                }
-            }
-        }
-    }
+    suspend fun reconcileParentUnions() = Unit
 
     /** Удаляет только пустые места и синхронизирует поля родителей из союзов (без «тихого» слияния). */
     suspend fun repairLivingKinship() {
@@ -182,7 +153,6 @@ class TreeRepository(
                     changed = true
                     people = peopleDao.all()
                 }
-                changed = syncLegacyParentFieldsLocked() || changed
             }
         }
         if (changed) {
@@ -207,18 +177,13 @@ class TreeRepository(
     suspend fun previewDeletePerson(id: String): DeletePersonImpact? = mutex.withLock {
         val people = peopleDao.all()
         val person = people.find { it.id == id } ?: return@withLock null
+        val graph = GenealogyGraphMapper.fromFamilies(people, familyDao.all(), familyChildDao.all())
         val unions = loadUnionProjection()
-        val ids = people.map { it.id }.toSet()
-        val compact = UnionEr.compactUnions(people, unions)
-        val children = people.filter { p ->
-            id in UnionEr.parentIdsOf(p, ids, compact)
-        }.map { it.fullName().ifBlank { it.id } }
+        val children = graph.childrenOf(id).map { it.fullName.ifBlank { it.id } }
         val spouses = spouseDraftsOf(unions, id).mapNotNull { d ->
             people.find { it.id == d.personId }?.fullName()?.ifBlank { d.personId }
         }
-        val parents = UnionEr.parentIdsOf(person, ids, compact).mapNotNull { pid ->
-            people.find { it.id == pid }?.fullName()?.ifBlank { pid }
-        }
+        val parents = graph.parentsOf(id).map { it.fullName.ifBlank { it.id } }
         val summary = buildString {
             append("Карточка «${person.fullName()}» ")
             if (person.vacant) append("будет удалена с древа.") else append("станет пустым местом (данные и связи на месте).")
@@ -273,11 +238,10 @@ class TreeRepository(
                     union.copy(
                         partnerAId = union.partnerAId?.replace(removeId, keepId),
                         partnerBId = union.partnerBId?.replace(removeId, keepId),
-                        childIds = union.childIdsList().joinToString(",") { if (it == removeId) keepId else it },
+                        childIds = union.childIds.map { if (it == removeId) keepId else it },
                     )
                 }.distinctBy { it.id }
-                val compact = UnionEr.compactUnions(people.filter { it.id != removeId }, unions)
-                persistUnionProjection(compact)
+                persistUnionProjection(unions)
                 val now = System.currentTimeMillis()
                 people.filter { it.id != removeId }.forEach { person ->
                     if (person.id == keepId) {
@@ -299,153 +263,6 @@ class TreeRepository(
             }
         }
         schedulePush()
-    }
-
-    private suspend fun applyKinshipMutation(
-        transform: (ru.hdlabs.treex.domain.FamilyTreeState) -> ru.hdlabs.treex.domain.FamilyTreeState,
-    ) {
-        mutex.withLock {
-            database.withTransaction {
-                snapshotLocked(readLocked())
-                val people = peopleDao.all()
-                val unions = loadUnionProjection()
-                var state = familyTreeStateFrom(people, unions)
-                state = transform(state)
-                persistUnionProjection(state.unions.map { it.toUnionEntity() })
-                syncLegacyParentFieldsLocked()
-                generation += 1
-            }
-        }
-        schedulePush()
-    }
-
-    private suspend fun syncLegacyParentFieldsLocked(): Boolean = false
-
-    @Deprecated(
-        message = "Use KinshipRepository from PersonScreens",
-        level = DeprecationLevel.WARNING,
-    )
-    suspend fun savePerson(
-        person: PersonEntity,
-        spouses: List<SpouseDraft>,
-        snapshot: Boolean,
-        attach: RelativeAttach? = null,
-        preserveUntouched: Boolean = false,
-        touched: Set<String> = emptySet(),
-    ): Boolean {
-        // Уход в настройки отменяет корутину экрана. Запись нельзя откатывать вместе с ней.
-        val changed = withContext(NonCancellable) {
-            mutex.withLock {
-            database.withTransaction {
-                val existing = peopleDao.all()
-                val knownIds = existing.map { it.id }.toSet() + person.id
-                val previous = peopleDao.get(person.id)
-                val merged = if (previous != null && preserveUntouched) mergePerson(previous, person, touched) else person
-                val named = merged.firstName.isNotBlank() || merged.lastName.isNotBlank() || merged.middleName.isNotBlank()
-                val baseClean = merged.copy(
-                    lastName = capitalizePersonName(merged.lastName),
-                    birthLastName = if (merged.gender == "f") {
-                        capitalizePersonName(merged.birthLastName)
-                    } else {
-                        ""
-                    },
-                    firstName = capitalizePersonName(merged.firstName),
-                    middleName = capitalizePersonName(merged.middleName),
-                    vacant = merged.vacant && !named,
-                )
-                val anchor = attach?.anchorId?.takeIf { it in knownIds && it != baseClean.id }?.let { id ->
-                    existing.find { it.id == id }
-                }
-                val linkRole = attach?.role?.takeIf { anchor != null }
-                val clean = when (linkRole) {
-                    "sister", "brother" -> baseClean.copy(
-                        gender = if (linkRole == "sister") "f" else "m",
-                    )
-                    else -> baseClean
-                }
-                val unionSnapshot = UnionEr.reconcileChildMembership(existing, loadUnionProjection())
-                val projectedUnions = if (linkRole != null && anchor != null) {
-                    UnionErAttach.applyRelativeAttach(existing, unionSnapshot, anchor.id, linkRole, clean)
-                } else {
-                    unionSnapshot
-                }
-                val parentMap = UnionEr.parentPairsMap(existing + clean, projectedUnions)
-                val pair = parentMap[clean.id] ?: (null to null)
-                if (TreeRules.createsCycle(parentMap, clean.id, pair.first, pair.second)) {
-                    throw IllegalArgumentException("Такая связь замыкает круг в древе")
-                }
-                if (linkRole == "father" && anchor != null) {
-                    val anchorPair = parentMap[anchor.id] ?: (null to null)
-                    if (TreeRules.createsCycle(parentMap, anchor.id, clean.id, anchorPair.second)) {
-                        throw IllegalArgumentException("Такая связь замыкает круг в древе")
-                    }
-                }
-                if (linkRole == "mother" && anchor != null) {
-                    val anchorPair = parentMap[anchor.id] ?: (null to null)
-                    if (TreeRules.createsCycle(parentMap, anchor.id, anchorPair.first, clean.id)) {
-                        throw IllegalArgumentException("Такая связь замыкает круг в древе")
-                    }
-                }
-                val previousSpouses = spouseDraftsOf(loadUnionProjection(), clean.id).sortedBy { it.personId }
-                val formSpouses = (spouses + listOfNotNull(
-                    if (linkRole == "spouse" && anchor != null) SpouseDraft(anchor.id, spouses.find { it.personId == anchor.id }?.marriedOn.orEmpty()) else null,
-                )).filter { it.personId.isNotBlank() && it.personId != clean.id && it.personId in knownIds }
-                    .distinctBy { it.personId }
-                val nextSpouses = mergeSpouseDrafts(
-                    previous = previousSpouses,
-                    incoming = formSpouses,
-                    replace = previous == null || !preserveUntouched || "spouses" in touched,
-                ).sortedBy { it.personId }
-                val anchorAlreadyLinked = when (linkRole) {
-                    "father", "mother" -> {
-                        val childUnion = anchor?.let { UnionEr.findParentUnionForChild(projectedUnions, it.id) }
-                        childUnion?.partnerIds()?.contains(clean.id) == true
-                    }
-                    else -> true
-                }
-                if (previous != null && sameContent(previous, clean) && previousSpouses == nextSpouses && anchorAlreadyLinked) {
-                    false
-                } else {
-                    val now = System.currentTimeMillis()
-                    peopleDao.upsert(
-                        clean.copy(
-                            gender = if (clean.gender == "m" || clean.gender == "f") clean.gender else "u",
-                            createdAtMillis = previous?.createdAtMillis?.takeIf { it > 0 }
-                                ?: clean.createdAtMillis.takeIf { it > 0 }
-                                ?: now,
-                            updatedAtMillis = now,
-                        ),
-                    )
-                    val allPeople = peopleDao.all()
-                    val attachForUnion = attach?.takeIf { linkRole != null && anchor != null }
-                    val unionsFinal = KinshipPersistence.rebuildUnions(
-                        people = allPeople,
-                        existingUnions = loadUnionProjection(),
-                        focusPersonId = clean.id,
-                        spouseDrafts = nextSpouses,
-                        attach = attachForUnion,
-                        focusPerson = clean,
-                    )
-                    persistUnionProjection(unionsFinal)
-                    syncLegacyParentFieldsLocked()
-                    generation += 1
-                    if (snapshot) snapshotLocked(readLocked())
-                    true
-                }
-            }
-            }
-        }
-        if (changed) {
-            val settings = settingsRepository.settings.first()
-            if (settings.homePersonId.isBlank() && !person.vacant) {
-                val livingCount = mutex.withLock { peopleDao.all().count { !it.vacant } }
-                if (livingCount == 1) {
-                    settingsRepository.update { it.copy(homePersonId = person.id) }
-                }
-            }
-            schedulePush()
-        }
-        return changed
     }
 
     suspend fun deletePerson(id: String) {
@@ -1136,19 +953,7 @@ class TreeRepository(
             val (familyEntities, childRows) = if (normalized.families.isNotEmpty()) {
                 FamilyBackupMapper.fromFamilyRecords(normalized.families)
             } else {
-                val rawUnions = normalized.unions.map { u ->
-                    UnionEntity(
-                        id = u.id,
-                        partnerAId = u.partnerAId,
-                        partnerBId = u.partnerBId,
-                        marriedOn = u.marriedOn,
-                        childIds = u.childIds.joinToString(","),
-                        unionType = u.unionType,
-                    )
-                }
-                FamilyBackupMapper.fromUnionEntities(
-                    UnionEr.reconcileChildMembership(entities, rawUnions),
-                )
+                FamilyBackupMapper.fromUnionRecords(normalized.unions)
             }
             familyEntities.forEach { familyDao.upsert(it) }
             if (childRows.isNotEmpty()) familyChildDao.insertAll(childRows)
@@ -1156,14 +961,14 @@ class TreeRepository(
         pruneOpenLinks(normalized.people.map { it.id }.toSet())
     }
 
-    private suspend fun loadUnionProjection(): List<UnionEntity> {
+    private suspend fun loadUnionProjection(): List<UnionRecord> {
         val families = familyDao.all()
         val children = familyChildDao.all()
-        return FamilyBackupMapper.toUnionEntities(families, children)
+        return FamilyBackupMapper.toUnionRecords(families, children)
     }
 
-    private suspend fun persistUnionProjection(unions: List<UnionEntity>) {
-        val (families, children) = FamilyBackupMapper.fromUnionEntities(unions)
+    private suspend fun persistUnionProjection(unions: List<UnionRecord>) {
+        val (families, children) = FamilyBackupMapper.fromUnionRecords(unions)
         familyChildDao.deleteAll()
         familyDao.deleteAll()
         families.forEach { familyDao.upsert(it) }
@@ -1175,7 +980,7 @@ class TreeRepository(
         val b = maxOf(first, second)
         val unions = loadUnionProjection().toMutableList()
         if (unions.none { setOf(it.partnerAId, it.partnerBId) == setOf(a, b) }) {
-            unions += UnionEntity(stableUnionId(a, b), a, b)
+            unions += UnionRecord(id = stableUnionId(a, b), partnerAId = a, partnerBId = b)
             persistUnionProjection(unions)
         }
     }

@@ -1,7 +1,7 @@
 package ru.hdlabs.treex.domain
 
+import ru.hdlabs.treex.backup.UnionRecord
 import ru.hdlabs.treex.data.local.PersonEntity
-import ru.hdlabs.treex.data.local.UnionEntity
 
 data class SpouseDraft(
     val personId: String,
@@ -58,7 +58,13 @@ fun mergeSpouseDrafts(
     return (previous + incoming.filter { it.personId !in known }).distinctBy { it.personId }
 }
 
-fun spouseDraftsOf(unions: List<UnionEntity>, personId: String): List<SpouseDraft> =
+/** Фамилия для новых карточек родителей: у женщины — девичья (или текущая), у мужчины — его фамилия. */
+fun suggestedParentFamilyName(host: PersonEntity): String = when (host.gender) {
+    "f" -> host.birthLastName.trim().ifBlank { host.lastName.trim() }
+    else -> host.lastName.trim()
+}
+
+fun spouseDraftsOf(unions: List<UnionRecord>, personId: String): List<SpouseDraft> =
     unions.mapNotNull { union ->
         val other = when (personId) {
             union.partnerAId -> union.partnerBId

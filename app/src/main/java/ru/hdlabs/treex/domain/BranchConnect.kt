@@ -1,7 +1,7 @@
 package ru.hdlabs.treex.domain
 
+import ru.hdlabs.treex.backup.UnionRecord
 import ru.hdlabs.treex.data.local.PersonEntity
-import ru.hdlabs.treex.data.local.UnionEntity
 
 enum class BranchConnectMode {
     SPOUSE,
@@ -24,8 +24,8 @@ data class BranchConnectPlan(
     val unionPartners: Pair<String, String>?,
 )
 
-private fun parentPair(unions: List<UnionEntity>, childId: String): Pair<String?, String?> {
-    val union = unions.find { childId in it.childIdsList() } ?: return null to null
+private fun parentPair(unions: List<UnionRecord>, childId: String): Pair<String?, String?> {
+    val union = unions.find { childId in it.childIds } ?: return null to null
     return union.partnerAId to union.partnerBId
 }
 
@@ -34,7 +34,7 @@ fun planBranchConnect(
     target: PersonEntity,
     mode: BranchConnectMode,
     people: List<PersonEntity>,
-    unions: List<UnionEntity>,
+    unions: List<UnionRecord>,
     nowMillis: Long = System.currentTimeMillis(),
 ): BranchConnectPlan {
     require(subject.id != target.id) { "Нельзя связать карточку с самой собой" }

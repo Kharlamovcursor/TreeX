@@ -14,7 +14,7 @@ import android.text.TextPaint
 import kotlinx.coroutines.runBlocking
 import ru.hdlabs.treex.data.local.AppDatabase
 import ru.hdlabs.treex.data.local.PersonEntity
-import ru.hdlabs.treex.data.local.UnionEntity
+import ru.hdlabs.treex.backup.UnionRecord
 import ru.hdlabs.treex.domain.OpenLink
 import ru.hdlabs.treex.domain.fullName
 import ru.hdlabs.treex.domain.graph.GenealogyGraphMapper
@@ -34,7 +34,7 @@ object TreeSnapshotRenderer {
     fun renderPng(
         context: Context,
         people: List<PersonEntity>,
-        unions: List<UnionEntity>,
+        unions: List<UnionRecord>,
         openLinks: List<OpenLink>,
         homePersonId: String?,
     ): ByteArray {

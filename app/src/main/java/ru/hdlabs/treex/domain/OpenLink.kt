@@ -1,8 +1,8 @@
 package ru.hdlabs.treex.domain
 
 import kotlinx.serialization.Serializable
+import ru.hdlabs.treex.backup.UnionRecord
 import ru.hdlabs.treex.data.local.PersonEntity
-import ru.hdlabs.treex.data.local.UnionEntity
 import java.util.UUID
 
 fun describeOpenLink(link: OpenLink, people: List<PersonEntity>): String {
@@ -39,15 +39,15 @@ data class OpenLink(
     val anchorIsParent: Boolean = false,
 )
 
-private fun childParentPair(unions: List<UnionEntity>, childId: String): Pair<String?, String?> {
-    val union = unions.find { childId in it.childIdsList() } ?: return null to null
+private fun childParentPair(unions: List<UnionRecord>, childId: String): Pair<String?, String?> {
+    val union = unions.find { childId in it.childIds } ?: return null to null
     return union.partnerAId to union.partnerBId
 }
 
 fun linksAfterRemoval(
     removed: PersonEntity,
     people: List<PersonEntity>,
-    unions: List<UnionEntity>,
+    unions: List<UnionRecord>,
 ): List<OpenLink> {
     val known = people.map { it.id }.toSet()
     if (removed.id !in known) return emptyList()
@@ -107,8 +107,8 @@ fun transferVacantSlot(
     vacantId: String,
     targetId: String,
     people: List<PersonEntity>,
-    unions: List<UnionEntity>,
-): Pair<List<PersonEntity>, List<UnionEntity>> {
+    unions: List<UnionRecord>,
+): Pair<List<PersonEntity>, List<UnionRecord>> {
     if (vacantId == targetId) return emptyList<PersonEntity>() to unions
     val byId = people.associateBy { it.id }.toMutableMap()
     val vacant = byId[vacantId] ?: return emptyList<PersonEntity>() to unions
@@ -118,9 +118,8 @@ fun transferVacantSlot(
         union.copy(
             partnerAId = union.partnerAId?.replace(vacantId, targetId),
             partnerBId = union.partnerBId?.replace(vacantId, targetId),
-            childIds = union.childIdsList().joinToString(",") { if (it == vacantId) targetId else it },
+            childIds = union.childIds.map { if (it == vacantId) targetId else it },
         )
     }
-    val merged = UnionEr.compactUnions(byId.values.toList(), updatedUnions)
-    return emptyList<PersonEntity>() to merged
+    return emptyList<PersonEntity>() to updatedUnions.distinctBy { it.id }
 }

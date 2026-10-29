@@ -227,7 +227,7 @@ object DatabaseMigrations {
         )
     }
 
-    /** Same rules as [ru.hdlabs.treex.domain.UnionEntity.childIdsList] + dedupe keeping first order. */
+    /** Dedupe child ids keeping first order (legacy unions CSV in migration 4->5). */
     internal fun parseChildIdsCsv(raw: String): List<String> {
         if (raw.isBlank()) return emptyList()
         val distinct = mutableListOf<String>()

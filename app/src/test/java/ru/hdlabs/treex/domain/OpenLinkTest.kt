@@ -3,8 +3,8 @@ package ru.hdlabs.treex.domain
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import ru.hdlabs.treex.backup.UnionRecord
 import ru.hdlabs.treex.data.local.PersonEntity
-import ru.hdlabs.treex.data.local.UnionEntity
 
 class OpenLinkTest {
     @Test
@@ -12,7 +12,7 @@ class OpenLinkTest {
         val father = PersonEntity(id = "f", gender = "m")
         val mother = PersonEntity(id = "m", gender = "f")
         val child = PersonEntity(id = "c")
-        val unions = listOf(UnionEntity("u", "f", "m", childIds = "c"))
+        val unions = listOf(UnionRecord("u", "f", "m", childIds = listOf("c")))
         val links = linksAfterRemoval(father, listOf(father, mother, child), unions)
         assertTrue(links.any { it.slot == "spouse" && it.ownerId == "m" })
         assertTrue(links.any { it.slot == "father" && it.ownerId == "c" && it.anchorId == "m" })
@@ -25,8 +25,8 @@ class OpenLinkTest {
         val middle = PersonEntity(id = "f", gender = "m")
         val child = PersonEntity(id = "c")
         val unions = listOf(
-            UnionEntity("u1", "g", null, childIds = "f"),
-            UnionEntity("u2", "f", null, childIds = "c"),
+            UnionRecord("u1", "g", null, childIds = listOf("f")),
+            UnionRecord("u2", "f", null, childIds = listOf("c")),
         )
         val bridge = linksAfterRemoval(middle, listOf(grand, middle, child), unions).single { it.slot == "bridge" }
         assertEquals("g", bridge.anchorId)

@@ -1,7 +1,7 @@
 package ru.hdlabs.treex.domain
 
 import ru.hdlabs.treex.data.local.PersonEntity
-import ru.hdlabs.treex.data.local.UnionEntity
+import ru.hdlabs.treex.backup.UnionRecord
 import java.time.LocalDate
 import java.time.Period
 import java.time.format.DateTimeFormatter
@@ -166,7 +166,7 @@ fun acceptsAsSpouse(hostGender: String, candidateGender: String): Boolean = when
     else -> true
 }
 
-fun spouseIdsOf(unions: List<UnionEntity>, personId: String): List<String> =
+fun spouseIdsOf(unions: List<UnionRecord>, personId: String): List<String> =
     unions.mapNotNull { union ->
         when (personId) {
             union.partnerAId -> union.partnerBId

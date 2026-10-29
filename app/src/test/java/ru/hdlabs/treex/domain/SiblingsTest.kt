@@ -3,12 +3,12 @@ package ru.hdlabs.treex.domain
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import ru.hdlabs.treex.backup.UnionRecord
 import ru.hdlabs.treex.data.local.PersonEntity
-import ru.hdlabs.treex.data.local.UnionEntity
 
 class SiblingsTest {
     private fun childUnion(id: String, father: String, mother: String, childId: String) =
-        UnionEntity(id = id, partnerAId = father, partnerBId = mother, childIds = childId)
+        UnionRecord(id = id, partnerAId = father, partnerBId = mother, childIds = listOf(childId))
 
     @Test
     fun fullAndHalfSiblings() {
@@ -38,8 +38,8 @@ class SiblingsTest {
         val withMother = PersonEntity(id = "galina2", gender = "f")
         val maria = PersonEntity(id = "maria", gender = "f")
         val unions = listOf(
-            UnionEntity(id = "u1", partnerAId = null, partnerBId = "maria", childIds = "olga"),
-            UnionEntity(id = "u2", partnerAId = null, partnerBId = "maria", childIds = "galina2"),
+            UnionRecord(id = "u1", partnerAId = null, partnerBId = "maria", childIds = listOf("olga")),
+            UnionRecord(id = "u2", partnerAId = null, partnerBId = "maria", childIds = listOf("galina2")),
         )
         val people = listOf(anchor, stranger, sister, withMother, maria)
         assertTrue(siblingsMissingParent(people, anchor, "pavlov", asFather = true, unions).isEmpty())
